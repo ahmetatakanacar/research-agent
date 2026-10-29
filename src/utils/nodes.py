@@ -6,6 +6,7 @@ from src.utils.prompts import analyst_instructions, question_instructions, searc
 from langchain.messages import SystemMessage, HumanMessage
 from langgraph.types import interrupt
 from langchain_tavily import TavilySearch
+from langchain_core.messages import get_buffer_string
 
 load_dotenv()
 
@@ -110,3 +111,11 @@ def generate_answer(state: InterviewState):
     answer.name = "expert"
 
     return {"messages": [answer]}
+
+def save_interview(state: InterviewState):
+
+    messages = state["messages"]
+    interview = get_buffer_string(messages)
+
+    return {"interview": interview}
+
