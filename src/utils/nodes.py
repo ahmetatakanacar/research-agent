@@ -2,13 +2,18 @@ from dotenv import load_dotenv
 from src.utils.states import GenerateAnalystState, InterviewState
 from src.utils.models import llm
 from src.utils.objects import Analyst, Perpectives, SearchQuery
-from src.utils.prompts import analyst_instructions, question_instructions, search_instructions, answer_instructions
+from src.utils.prompts import analyst_instructions, question_instructions, search_instructions, answer_instructions, section_writer_instructions
 from langchain.messages import SystemMessage, HumanMessage
 from langgraph.types import interrupt
 from langchain_tavily import TavilySearch
+from langchain_community.document_loaders import WikipediaLoader
+import wikipedia
 from langchain_core.messages import get_buffer_string
 
 load_dotenv()
+
+# Wikipedia rejects the wikipedia package's default User-Agent with a 403
+wikipedia.set_user_agent("research-agent/0.1")
 
 def create_analyst(state: GenerateAnalystState):
 
@@ -16,7 +21,7 @@ def create_analyst(state: GenerateAnalystState):
     max_analyst = state["max_analyst"]
     human_analyst_feedback = state.get("human_analyst_feedback", "")
 
-    structured_llm = llm.with_structured_output(Perpectives)
+    structured_llm = llm.with_structured_output(Perpectives, method="function_calling")
     system_message = analyst_instructions.format(topic=topic, human_analyst_feedback=human_analyst_feedback, max_analyst=max_analyst)
     analyst = structured_llm.invoke([SystemMessage(content=system_message)] + [HumanMessage(content="Please generate the set of analyst.")])
     
@@ -59,7 +64,7 @@ def generate_question(state: InterviewState):
 
 def search_web(state: InterviewState):
 
-    structured_llm = llm.with_structured_output(SearchQuery)
+    structured_llm = llm.with_structured_output(SearchQuery, method="function_calling")
     search_instruction_system_message = SystemMessage(content=search_instructions)
     tavily_search = TavilySearch(max_results=3)
 
@@ -77,20 +82,18 @@ def search_web(state: InterviewState):
 
     return {"context": [formatted_search_docs]}
 
-def search_web2(state: InterviewState):
+def search_wikipedia(state: InterviewState):
 
-    structured_llm = llm.with_structured_output(SearchQuery)
+    structured_llm = llm.with_structured_output(SearchQuery, method="function_calling")
     search_instruction_system_message = SystemMessage(content=search_instructions)
-    tavily_search = TavilySearch(max_results=3)
 
     search_query = structured_llm.invoke([search_instruction_system_message] + state["messages"])
 
-    data = tavily_search.invoke({"query": search_query.search_query})
-    search_docs = data.get("results", data) 
+    search_docs = WikipediaLoader(query=search_query.search_query, load_max_docs=2).load()
 
     formatted_search_docs = "\n\n---\n\n".join(
         [
-            f'<Document href="{doc["url"]}"/>\n{doc["content"]}\n</Document>'
+            f'<Document source="{doc.metadata["source"]}"/>\n{doc.page_content}\n</Document>'
             for doc in search_docs
         ]
     )
@@ -119,3 +122,17 @@ def save_interview(state: InterviewState):
 
     return {"interview": interview}
 
+def write_section(state: InterviewState):
+
+    interview = state["interview"]
+    context = state["context"]
+    analyst = state["analyst"]
+
+    if isinstance(analyst, dict):
+        analyst = Analyst.model_validate(analyst)
+
+    system_message = section_writer_instructions.format(focus=analyst.description)
+    section = llm.invoke([SystemMessage(content=system_message)] + 
+                         [HumanMessage(content=f"Use this source to write your section: {context}")])
+
+    return {"sections": [section.content]}    
