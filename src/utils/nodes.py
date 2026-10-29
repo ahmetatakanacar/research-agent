@@ -1,8 +1,8 @@
 from dotenv import load_dotenv
-from src.utils.states import GenerateAnalystState
+from src.utils.states import GenerateAnalystState, InterviewState
 from src.utils.models import llm
 from src.utils.objects import Analyst, Perpectives
-from src.utils.prompts import analyst_instructions
+from src.utils.prompts import analyst_instructions, question_instructions
 from langchain.messages import SystemMessage, HumanMessage
 from langgraph.types import interrupt
 
@@ -42,3 +42,15 @@ def human_feedback(state: GenerateAnalystState):
         return {"human_analyst_feedback": feedback}
 
     return {"human_analyst_feedback": None}
+
+def generate_question(state: InterviewState):
+
+    analyst = state["analyst"]
+    if isinstance(analyst, dict):
+        analyst = Analyst.model_validate(analyst)
+
+    messages = state["messages"]
+    system_message = question_instructions.format(goals=analyst.persona)
+    question = llm.invoke([SystemMessage(content=system_message)] + messages)
+
+    return {"messages": [question]}
