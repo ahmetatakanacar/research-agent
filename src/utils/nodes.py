@@ -6,15 +6,10 @@ from src.utils.prompts import analyst_instructions, question_instructions, searc
 from src.utils.prompts import report_writer_instructions, intro_conclusion_instructions
 from langchain.messages import SystemMessage, HumanMessage
 from langgraph.types import interrupt
-from langchain_tavily import TavilySearch
-from langchain_community.document_loaders import WikipediaLoader
-import wikipedia
+from src.utils.tools import tavily_search, wikipedia_search
 from langchain_core.messages import get_buffer_string
 
 load_dotenv()
-
-# Wikipedia rejects the wikipedia package's default User-Agent with a 403
-wikipedia.set_user_agent("research-agent/0.1")
 
 def create_analyst(state: GenerateAnalystState):
 
@@ -26,14 +21,14 @@ def create_analyst(state: GenerateAnalystState):
     system_message = analyst_instructions.format(topic=topic, human_analyst_feedback=human_analyst_feedback, max_analyst=max_analyst)
     analyst = structured_llm.invoke([SystemMessage(content=system_message)] + [HumanMessage(content="Please generate the set of analyst.")])
     
-    return {"analyst": analyst.analyst}
+    return {"analysts": analyst.analyst}
 
 def human_feedback(state: GenerateAnalystState):
     feedback = interrupt({
         "question": "Are these analysts okay?",
-        "analyst": [
+        "analysts": [
             analyst.model_dump() if hasattr(analyst, "model_dump") else analyst
-                for analyst in state.get("analyst", [])
+                for analyst in state.get("analysts", [])
         ],
         "instructions": "Return feedback to regenerate analysts, or return empty/perfect/continue to approve."
     })
@@ -67,21 +62,10 @@ def search_web(state: InterviewState):
 
     structured_llm = llm.with_structured_output(SearchQuery, method="function_calling")
     search_instruction_system_message = SystemMessage(content=search_instructions)
-    tavily_search = TavilySearch(max_results=3)
 
     search_query = structured_llm.invoke([search_instruction_system_message] + state["messages"])
 
-    data = tavily_search.invoke({"query": search_query.search_query})
-    search_docs = data.get("results", data) 
-
-    formatted_search_docs = "\n\n---\n\n".join(
-        [
-            f'<Document href="{doc["url"]}"/>\n{doc["content"]}\n</Document>'
-            for doc in search_docs
-        ]
-    )
-
-    return {"context": [formatted_search_docs]}
+    return {"context": [tavily_search(search_query.search_query)]}
 
 def search_wikipedia(state: InterviewState):
 
@@ -90,16 +74,7 @@ def search_wikipedia(state: InterviewState):
 
     search_query = structured_llm.invoke([search_instruction_system_message] + state["messages"])
 
-    search_docs = WikipediaLoader(query=search_query.search_query, load_max_docs=2).load()
-
-    formatted_search_docs = "\n\n---\n\n".join(
-        [
-            f'<Document source="{doc.metadata["source"]}"/>\n{doc.page_content}\n</Document>'
-            for doc in search_docs
-        ]
-    )
-
-    return {"context": [formatted_search_docs]}
+    return {"context": [wikipedia_search(search_query.search_query)]}
 
 def generate_answer(state: InterviewState):
 
@@ -157,7 +132,7 @@ def write_introduction(state: ResearchGraphState):
     formatted_str_sections = "\n\n".join([f"{section}" for section in sections])
     
     instructions = intro_conclusion_instructions.format(topic=topic, formatted_str_sections=formatted_str_sections)    
-    intro = llm.invoke([instructions]+[HumanMessage(content=f"Write the report introduction")]) 
+    intro = llm.invoke([SystemMessage(content=instructions)]+[HumanMessage(content=f"Write the report introduction")]) 
     return {"introduction": intro.content}
 
 def write_conclusion(state: ResearchGraphState):
@@ -168,7 +143,7 @@ def write_conclusion(state: ResearchGraphState):
     formatted_str_sections = "\n\n".join([f"{section}" for section in sections])
 
     instructions = intro_conclusion_instructions.format(topic=topic, formatted_str_sections=formatted_str_sections)    
-    conclusion = llm.invoke([instructions]+[HumanMessage(content=f"Write the report conclusion")]) 
+    conclusion = llm.invoke([SystemMessage(content=instructions)]+[HumanMessage(content=f"Write the report conclusion")]) 
     return {"conclusion": conclusion.content}
 
 def finalize_report(state: ResearchGraphState):

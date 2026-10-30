@@ -8,7 +8,7 @@ class GenerateAnalystState(TypedDict):
     topic: str
     max_analyst: int
     human_analyst_feedback: NotRequired[Optional[str]]
-    analyst: NotRequired[List[Analyst]]
+    analysts: NotRequired[List[Analyst]]
 
 class InterviewState(MessagesState):
     max_num_turns: int
@@ -21,7 +21,7 @@ class ResearchGraphState(TypedDict):
     topic: str
     max_analyst: int
     human_analyst_feedback: NotRequired[Optional[str]]
-    analyst: List[Analyst]
+    analysts: List[Analyst]
     sections: Annotated[list, operator.add]
     introduction: str
     content: str
