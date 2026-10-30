@@ -1,8 +1,9 @@
 from dotenv import load_dotenv
-from src.utils.states import GenerateAnalystState, InterviewState
+from src.utils.states import GenerateAnalystState, InterviewState, ResearchGraphState
 from typing import Literal
 from langgraph.graph import END
-from langchain.messages import AIMessage
+from langchain.messages import AIMessage, HumanMessage
+from langgraph.types import Send
 
 load_dotenv()
 
@@ -25,3 +26,18 @@ def route_messages(state: InterviewState, name: str="expert"):
         return "save_interview"
 
     return "ask_question"
+
+def initiate_all_interviews(state: ResearchGraphState):
+
+    human_analyst_feedback = state.get("human_analyst_feedback")
+
+    if human_analyst_feedback:
+        return "create_analyst"
+    else:   
+        topic = state["topic"]
+        return [
+            Send("conduct_interview", {
+                "analyst": analyst,
+                "messages": [HumanMessage(content=f"so you said you were writing an article on {topic}")]
+            }) for analyst in state["analyst"]
+        ]
