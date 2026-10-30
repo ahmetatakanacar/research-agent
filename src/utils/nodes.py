@@ -1,8 +1,8 @@
 from dotenv import load_dotenv
-from src.utils.states import GenerateAnalystState, InterviewState
+from src.utils.states import GenerateAnalystState, InterviewState, ResearchGraphState
 from src.utils.models import llm
 from src.utils.objects import Analyst, Perpectives, SearchQuery
-from src.utils.prompts import analyst_instructions, question_instructions, search_instructions, answer_instructions, section_writer_instructions
+from src.utils.prompts import analyst_instructions, question_instructions, search_instructions, answer_instructions, section_writer_instructions, report_writer_instructions
 from langchain.messages import SystemMessage, HumanMessage
 from langgraph.types import interrupt
 from langchain_tavily import TavilySearch
@@ -135,4 +135,15 @@ def write_section(state: InterviewState):
     section = llm.invoke([SystemMessage(content=system_message)] + 
                          [HumanMessage(content=f"Use this source to write your section: {context}")])
 
-    return {"sections": [section.content]}    
+    return {"sections": [section.content]}
+
+def write_report(state: ResearchGraphState):
+
+    sections = state["sections"]
+    topic = state["topic"]
+
+    formatted_str_sections = "\n\n".join([f"{section}" for section in sections])
+
+    system_message = report_writer_instructions.format(topic=topic, context=formatted_str_sections)    
+    report = llm.invoke([SystemMessage(content=system_message)]+[HumanMessage(content=f"Write a report based upon these memos.")]) 
+    return {"content": report.content}
