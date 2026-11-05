@@ -50,7 +50,7 @@ Pick up to {limit} candidates, fewer when the rest are not good enough. Always r
 Candidates may be in different languages: judge them by trustworthiness and relevance, not by language.
 Skip candidates that are off-topic or belong to an unrelated subject, even if they come from an official or academic site.
 Prefer, in this order: official documentation and primary sources, peer-reviewed or academic publications, government and standards bodies, reputable independent publications, then expert-written technical articles.
-Avoid marketing pages, SEO listicles, product pitches, company service, agency and consultancy pages, aggregator pages, mirrors or copies of documentation on unrelated domains, and pages that only mention the topic in passing.
+Avoid marketing pages, SEO listicles, product pitches, company service, agency and consultancy pages, course catalogs and learning-platform landing pages, AI skill or prompt marketplaces, affiliate and review sites, vendor blog posts written mainly to sell a product, aggregator pages, mirrors or copies of documentation on unrelated domains, and pages that only mention the topic in passing.
 Well-argued, in-depth articles by named practitioners are fine wherever they are published, including blog platforms such as Medium or Substack; prefer them over thin or promotional pages.
 Choose sources that complement each other instead of repeating one another. When several candidates only restate the same primary source, choose the primary source.
 Return their numbers, best first.
@@ -138,6 +138,7 @@ To format your report:
 7. Do NOT write a Sources or References section; it is generated automatically.
 8. When memos disagree, prefer the claims backed by the more authoritative sources (official documentation, primary research, government and academic sources).
 9. Do not repeat the same point in different paragraphs: merge overlapping points from different memos into one. Do not recap the whole report at the end of the body; the conclusion does that.
+10. Make each sentence's framing match its evidence: never open with a general claim and then cite an example that points the other way.
 {language_instruction}
 
 Here are the memos from your analysts to build your report from:
@@ -156,6 +157,7 @@ Use markdown formatting.
 For your introduction, create a compelling title and use the # header for the title.
 For your introduction, use ## {introduction_header} as the section header.
 For your conclusion, use ## {conclusion_header} as the section header.
+Only restate what the sections say: never add a claim, number or recommendation that the sections do not contain.
 Keep the citation numbers like [1] exactly as they appear in the sections; never invent new numbers. A claim you restate keeps its citation.
 Put each citation right after the claim it supports, before the closing punctuation, with at most three per statement. Never collect citations in a block at the end of a paragraph.
 {language_instruction}
@@ -166,6 +168,7 @@ review_instructions = """
 You are a meticulous fact-checker. Below is a draft report and the numbered sources it cites.
 For every claim that carries a citation such as [2], check that source 2 really supports the claim.
 Also flag specific factual claims (numbers, dates, names, causal statements) that carry no citation and that no source supports.
+Also flag a sentence whose own framing is contradicted by the evidence it cites, for example one that says something is not an improvement and then cites a result showing an improvement.
 Report only genuine problems: claims that are unsupported by their cited source, contradicted by it, or invented.
 Do not flag style, tone, or claims that are reasonable paraphrases. If everything holds up, return no issues.
 Describe each problem in {language}.
@@ -180,6 +183,7 @@ SOURCES:
 revise_instructions = """
 You are an editor. Below is a draft report and a list of problems found by a fact-checker.
 Fix the draft: remove or soften every flagged claim so that the report states only what its sources support.
+Replace a flagged claim with its corrected wording, or delete it; never leave the original claim next to its corrected version.
 Do not add new facts. Keep the headings, the structure and every citation number that is still valid exactly as they are.
 Return the complete corrected report in markdown, with no preamble.
 {language_instruction}
