@@ -21,6 +21,13 @@ TAGLINE_WORDS = frozenset({"leader", "speaker", "advisor", "consultant", "founde
 TITLE_DASHES = (" — ", " – ", " - ", " · ")
 TITLE_ACRONYMS = frozenset({"ai", "llm", "llms", "api", "apis", "ui", "ux", "ml", "sql", "aws", "gpu", "cpu", "sdk", "mcp", "a2a", "rag"})
 MIN_TITLE_LENGTH = 8
+MIN_TRIMMED_WORDS = 3
+PDF_MARKER = re.compile(r"^[(\[]\s*pdf\s*[)\]]\s*", re.IGNORECASE)
+CUT_OFF = re.compile(r"\s+(?:\.{3}|…)$")
+DANGLING_WORDS = frozenset({
+    "a", "an", "and", "or", "of", "the", "in", "on", "for", "to", "with", "by", "at", "from", "vs", "&",
+    "ve", "ile", "için", "bir", "bu", "de", "da", "ki",
+})
 
 LOW_TRUST_DOMAINS = ("cloudns.asia", "cloudns.net", "duckdns.org", "no-ip.org", "ddns.net", "dynu.net")
 FREE_TLDS = frozenset({"tk", "ml", "ga", "cf", "gq"})
@@ -149,11 +156,7 @@ def _slug_words(url: str) -> list[str]:
     return words
 
 
-def _complete_truncated(title: str, url: str) -> str:
-    if not title.endswith(("...", "…")):
-        return title
-    prefix = title.rstrip(".… ").rstrip()
-    words = _slug_words(url)
+def _complete_from_words(prefix: str, words: list[str]) -> str | None:
     wanted = _letters(prefix)
     spelled = ""
     for count, word in enumerate(words, 1):
@@ -163,11 +166,38 @@ def _complete_truncated(title: str, url: str) -> str:
             return " ".join([prefix, *rest]) if rest else prefix
         if len(spelled) > len(wanted):
             break
+    return None
+
+
+def _complete_truncated(title: str, url: str) -> str:
+    if not title.endswith(("...", "…")):
+        return title
+    prefix = title.rstrip(".… ").rstrip()
+    words = _slug_words(url)
+    without_id = words[1:] if words and words[0].isdigit() else []
+    for candidate in (words, without_id):
+        completed = _complete_from_words(prefix, candidate)
+        if completed:
+            return completed
     return title
+
+
+def _trim_cut_off(title: str) -> str:
+    if not CUT_OFF.search(title):
+        return title
+    words = CUT_OFF.sub("", title).split()
+    while words and words[-1].lower().strip(",:;-–—") in DANGLING_WORDS:
+        words.pop()
+    if len(words) < MIN_TRIMMED_WORDS:
+        return title
+    return " ".join(words).rstrip(",:;-–— ")
 
 
 def clean_title(title: str, url: str) -> str:
     cleaned = " ".join(title.split())
+    unmarked = PDF_MARKER.sub("", cleaned)
+    if len(unmarked) >= MIN_TITLE_LENGTH:
+        cleaned = unmarked
     unprefixed = re.sub(r"^GitHub\s*[-–—:]\s*", "", cleaned)
     if len(unprefixed) >= MIN_TITLE_LENGTH:
         cleaned = unprefixed
@@ -186,4 +216,4 @@ def clean_title(title: str, url: str) -> str:
                 cleaned = head.strip()
                 stripped = True
                 break
-    return _complete_truncated(cleaned, url)
+    return _trim_cut_off(_complete_truncated(cleaned, url))
