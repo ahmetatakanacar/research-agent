@@ -1,109 +1,165 @@
+"""Search tools. Every tool returns a list of SourceDoc dicts and never raises:
+a failing source must not take the whole interview down."""
+
 import logging
 import os
+import re
 import threading
 import time
 from functools import lru_cache
+from urllib.parse import quote
+
+import requests
 from dotenv import load_dotenv
 from langchain_tavily import TavilySearch
-from langchain_community.document_loaders import WikipediaLoader
-import requests
-import wikipedia
-from wikipedia import wikipedia as wikipedia_client
+
+from src.utils.languages import LANGUAGES
+from src.utils.objects import SourceDoc
+from src.utils.ranking import BLOCKED_DOMAINS, clean_title, rank_results
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Wikimedia asks API clients to put contact details in the User-Agent and
-# throttles anonymous ones harder. Set WIKIPEDIA_USER_EMAIL in .env to your own address.
 _user_email = os.getenv("WIKIPEDIA_USER_EMAIL", "").strip()
-if _user_email:
-    wikipedia.set_user_agent(f"research-agent/0.1 ({_user_email})")
-else:
-    wikipedia.set_user_agent("research-agent/0.1")
-    logger.warning("WIKIPEDIA_USER_EMAIL is not set; Wikipedia may rate limit anonymous requests sooner")
+USER_AGENT = f"research-agent/0.2 ({_user_email})" if _user_email else "research-agent/0.2"
+if not _user_email:
+    logger.warning(
+        "WIKIPEDIA_USER_EMAIL is not set: Wikipedia rate-limits anonymous clients much sooner, "
+        "so Wikipedia searches may come back empty. Put your contact e-mail in .env and restart."
+    )
 
-WIKIPEDIA_API_URL = "https://en.wikipedia.org/w/api.php"
-WIKIPEDIA_MIN_INTERVAL = 0.25
+WIKIPEDIA_MIN_INTERVAL = 0.25 if _user_email else 0.75
+REQUEST_TIMEOUT = 15
+TAVILY_CANDIDATE_FACTOR = 2
+TAVILY_MAX_CANDIDATES = 20
+
 
 class WikipediaRateLimited(Exception):
     def __init__(self, retry_after: float):
         super().__init__(f"Wikipedia rate limit hit, retry after {retry_after:.0f}s")
         self.retry_after = retry_after
 
-_wikipedia_lock = threading.Lock()
-_wikipedia_next_request = 0.0
+
+class _Throttle:
+    def __init__(self, interval: float):
+        self.interval = interval
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            delay = max(0.0, self._next - now)
+            self._next = now + delay + self.interval
+        if delay:
+            time.sleep(delay)
+
+
+_wikipedia_throttle = _Throttle(WIKIPEDIA_MIN_INTERVAL)
 _wikipedia_blocked_until = 0.0
 
-def _wikipedia_request(params: dict) -> dict:
 
-    global _wikipedia_next_request, _wikipedia_blocked_until
+def _wikipedia_request(lang: str, params: dict) -> dict:
+    global _wikipedia_blocked_until
 
-    params["format"] = "json"
-    params.setdefault("action", "query")
+    now = time.monotonic()
+    if now < _wikipedia_blocked_until:
+        raise WikipediaRateLimited(_wikipedia_blocked_until - now)
 
-    with _wikipedia_lock:
-        now = time.monotonic()
-        if now < _wikipedia_blocked_until:
-            raise WikipediaRateLimited(_wikipedia_blocked_until - now)
-
-        time.sleep(max(0.0, _wikipedia_next_request - now))
-        response = requests.get(
-            WIKIPEDIA_API_URL,
-            params=params,
-            headers={"User-Agent": wikipedia_client.USER_AGENT},
-            timeout=15,
-        )
-        _wikipedia_next_request = time.monotonic() + WIKIPEDIA_MIN_INTERVAL
-
-        if response.status_code == 429:
-            try:
-                retry_after = float(response.headers["Retry-After"])
-            except (KeyError, ValueError):
-                retry_after = 30.0
-            _wikipedia_blocked_until = time.monotonic() + retry_after
-            raise WikipediaRateLimited(retry_after)
+    _wikipedia_throttle.wait()
+    response = requests.get(
+        f"https://{lang}.wikipedia.org/w/api.php",
+        params={"action": "query", "format": "json", "formatversion": 2, **params},
+        headers={"User-Agent": USER_AGENT},
+        timeout=REQUEST_TIMEOUT,
+    )
+    if response.status_code == 429:
+        try:
+            retry_after = float(response.headers["Retry-After"])
+        except (KeyError, ValueError):
+            retry_after = 30.0
+        _wikipedia_blocked_until = time.monotonic() + retry_after
+        raise WikipediaRateLimited(retry_after)
 
     response.raise_for_status()
     return response.json()
 
-wikipedia_client._wiki_request = _wikipedia_request
 
-@lru_cache(maxsize=1)
-def _get_tavily() -> TavilySearch:
-    return TavilySearch(max_results=3)
+_SEARCH_STOPWORDS = frozenset(
+    "and the for with how what why which from into about of in on to an "
+    "ile ve bir bu şu için nasıl neden nedir gibi olan".split()
+)
 
-def tavily_search(query: str) -> str:
-    
+
+def _any_word_query(query: str) -> str:
+    """Wikipedia search wants every word on the page, so a specific query ("LangGraph çok ajanlı sistem
+    tasarımı") finds nothing. This is the relaxed version: pages that match any of the main words."""
+    words = [w for w in dict.fromkeys(re.findall(r"\w{3,}", query.lower())) if w not in _SEARCH_STOPWORDS]
+    return " OR ".join(words[:6]) if len(words) > 1 else ""
+
+
+def _wikipedia_pages(lang: str, query: str, limit: int) -> list[dict]:
+    """Search and fetch the article introductions in one request: anonymous clients are rate limited
+    after only a handful of requests, so one request per search keeps Wikipedia usable."""
+    data = _wikipedia_request(lang, {
+        "generator": "search", "gsrsearch": query, "gsrlimit": limit,
+        "prop": "extracts|info", "exintro": 1, "explaintext": 1, "exlimit": "max", "inprop": "url",
+    })
+    pages = data.get("query", {}).get("pages", [])
+    return sorted(pages, key=lambda page: page.get("index", 0))
+
+
+def wikipedia_search(query: str, lang: str = "en", max_docs: int = 2, max_chars: int = 4000) -> list[SourceDoc]:
+    lang = lang if lang in LANGUAGES else "en"
     try:
-        data = _get_tavily().invoke({"query": query})
-    except Exception:
-        logger.warning("Tavily search failed for query %r", query, exc_info=True)
-        return ""
+        pages = _wikipedia_pages(lang, query, max_docs)
+        if not pages and (relaxed := _any_word_query(query)):
+            pages = _wikipedia_pages(lang, relaxed, max_docs)
 
-    search_docs = data.get("results", []) if isinstance(data, dict) else []
-
-    return "\n\n---\n\n".join(
-        [
-            f'<Document href="{doc["url"]}"/>\n{doc["content"]}\n</Document>'
-            for doc in search_docs
-        ]
-    )
-
-def wikipedia_search(query: str) -> str:
-   
-    try:
-        search_docs = WikipediaLoader(query=query, load_max_docs=2).load()
+        docs: list[SourceDoc] = []
+        for page in pages:
+            text = (page.get("extract") or "").strip()
+            title = page.get("title") or ""
+            if not text or not title:
+                continue
+            docs.append({
+                "url": page.get("fullurl") or f"https://{lang}.wikipedia.org/wiki/{quote(title.replace(' ', '_'))}",
+                "title": title,
+                "content": text[:max_chars],
+                "kind": "wikipedia",
+            })
+        return docs
     except WikipediaRateLimited as exc:
         logger.warning("Skipping Wikipedia search for query %r: %s", query, exc)
-        return ""
     except Exception:
         logger.warning("Wikipedia search failed for query %r", query, exc_info=True)
-        return ""
+    return []
 
-    return "\n\n---\n\n".join(
-        [
-            f'<Document source="{doc.metadata["source"]}"/>\n{doc.page_content}\n</Document>'
-            for doc in search_docs
-        ]
+
+@lru_cache(maxsize=8)
+def _get_tavily(search_depth: str, max_results: int) -> TavilySearch:
+    return TavilySearch(
+        max_results=max_results, search_depth=search_depth, exclude_domains=list(BLOCKED_DOMAINS)
     )
+
+
+def tavily_search(query: str, search_depth: str = "basic", max_results: int = 3) -> list[SourceDoc]:
+    depth = search_depth if search_depth in {"basic", "advanced"} else "basic"
+    limit = max(1, min(int(max_results), 10))
+    try:
+        data = _get_tavily(depth, min(limit * TAVILY_CANDIDATE_FACTOR, TAVILY_MAX_CANDIDATES)).invoke({"query": query})
+    except Exception:
+        logger.warning("Tavily search failed for query %r", query, exc_info=True)
+        return []
+
+    results = data.get("results", []) if isinstance(data, dict) else []
+    return [
+        {
+            "url": str(result["url"]),
+            "title": clean_title(str(result.get("title") or result["url"]), str(result["url"])),
+            "content": str(result["content"]),
+            "kind": "web",
+        }
+        for result in rank_results(results, limit)
+    ]
