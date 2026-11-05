@@ -1,8 +1,9 @@
-from src.utils.nodes import create_analyst, human_feedback
-from langgraph.graph import START, END, StateGraph
-from src.utils.states import GenerateAnalystState
 from dotenv import load_dotenv
+from langgraph.graph import START, StateGraph
+
 from src.utils.edges import should_continue
+from src.utils.nodes import create_analyst, human_feedback
+from src.utils.states import GenerateAnalystState
 
 load_dotenv()
 
