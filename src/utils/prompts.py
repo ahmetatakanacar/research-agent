@@ -131,7 +131,7 @@ To format your report:
 
 1. Use markdown formatting.
 2. Include no pre-amble for the report.
-3. Use no sub-heading.
+3. Organise the body under ### sub-headings, one for each main theme that runs across the memos (usually three to five). Give each a short, descriptive title. Never use analyst names or memo titles as sub-headings, and never nest deeper than ###.
 4. Start your report with a single title header: ## {insights_header}
 5. Do not mention any analyst names in your report.
 6. Use the citations from the memos for the claims they support, for example [1] or [2][3]. The numbers are already final: never renumber or invent them. Cite at most three sources for any single statement, choosing the most authoritative ones, and when an official or primary source covers a point, cite it rather than secondary pages that repeat it. Place each citation right after the claim it supports, before the closing punctuation.
