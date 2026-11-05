@@ -152,6 +152,130 @@ def test_titles_that_would_become_stubs_or_are_not_cut_off_are_left_alone():
         assert clean_title(title, url) == title
 
 
+def test_a_repeated_trailing_title_segment_is_dropped():
+    title = (
+        "Testing and Debugging - Build a Multi-Agent Chat System with Langgraph"
+        " - Build a Multi-Agent Chat System with Langgraph"
+    )
+    assert clean_title(title, "https://oboe.com/learn/x") == (
+        "Testing and Debugging - Build a Multi-Agent Chat System with Langgraph"
+    )
+    assert clean_title("A very long title - A very long title", "https://example.com/x") == "A very long title"
+
+
+def test_commas_glued_to_the_next_word_get_a_space_but_numbers_do_not():
+    assert clean_title(
+        "Contract for Checkpoint,Interrupt, and Resume Semantics", "https://example.com/x"
+    ) == "Contract for Checkpoint, Interrupt, and Resume Semantics"
+    assert clean_title("Over 1,000 agents in production", "https://example.com/x") == "Over 1,000 agents in production"
+
+
+def test_a_site_name_that_contains_the_whole_host_is_stripped_from_the_title():
+    title = "Replay, Resume, and Idempotency · LangGraph Field Guide · Doc Holiday Library"
+    assert clean_title(title, "https://doc.holiday/library/x") == "Replay, Resume, and Idempotency · LangGraph Field Guide"
+    assert clean_title("Something useful here · Library of Ai", "https://ai.co/x") == "Something useful here · Library of Ai"
+
+
+def test_redirect_links_and_shorteners_are_blocked_so_a_page_is_not_listed_twice():
+    for url in (
+        "https://go.microsoft.com/fwlink?linkid=2316094&clcid=0x41f",
+        "https://aka.ms/vector-search",
+        "https://bit.ly/3abc",
+    ):
+        assert is_blocked(url), url
+    assert not is_blocked("https://go.microsoft.com/docs")
+    assert not is_blocked("https://learn.microsoft.com/en-us/azure/documentdb/vector-search")
+
+
+def test_trailing_colons_and_dangling_via_are_trimmed_from_titles():
+    assert clean_title("FINOS AI Governance Framework:", "https://air-governance-framework.finos.org/x") == (
+        "FINOS AI Governance Framework"
+    )
+    assert clean_title(
+        "Defending LLM Embeddings Against Inversion Attacks via ...", "https://ojs.aaai.org/index.php/AAAI/article/view/1"
+    ) == "Defending LLM Embeddings Against Inversion Attacks"
+
+
+def test_academic_titles_cut_short_with_a_glued_ellipsis_are_trimmed():
+    cases = [
+        ("Intermittent fasting strategies and their effects on body weight: systematic review and network meta-analysis of…",
+         "https://pmc.ncbi.nlm.nih.gov/articles/PMC12175170",
+         "Intermittent fasting strategies and their effects on body weight: systematic review and network meta-analysis"),
+        ("Effects of Intermittent Energy Restriction on Body Composition and Cardiometabolic Risk Markers – A…",
+         "https://www.sciencedirect.com/science/article/pii/S2161831323013911",
+         "Effects of Intermittent Energy Restriction on Body Composition and Cardiometabolic Risk Markers"),
+        ("Comparison of Different Intermittent Fasting Patterns for Weight Loss in Adults: A…",
+         "https://pubmed.ncbi.nlm.nih.gov/40367516",
+         "Comparison of Different Intermittent Fasting Patterns for Weight Loss in Adults"),
+        ("Intermittent versus continuous energy restriction on weight loss: a systematic review and meta-analysis of randomized controlled…",
+         "https://link.springer.com/article/10.1186/s12967-018-1748-4",
+         "Intermittent versus continuous energy restriction on weight loss: a systematic review and meta-analysis"),
+    ]
+    for title, url, expected in cases:
+        assert clean_title(title, url) == expected
+
+
+def test_a_trailing_period_is_dropped_unless_it_belongs_to_an_abbreviation():
+    assert clean_title("Intermittent fasting for adults with overweight or obesity.", "https://pubmed.ncbi.nlm.nih.gov/1") == (
+        "Intermittent fasting for adults with overweight or obesity"
+    )
+    for title in ("Made in the U.S.", "Wait for it...", "Annual report of Acme Inc."):
+        assert clean_title(title, "https://example.com/x") == title
+
+
+def test_the_conclusion_prompt_forbids_new_claims():
+    from src.utils.prompts import intro_conclusion_instructions
+
+    assert "never add a claim, number or recommendation" in intro_conclusion_instructions
+
+
+def test_very_long_titles_are_shortened_at_a_word_boundary():
+    question = (
+        "In a LangGraph workflow, several parallel nodes update the same state and a process can be resumed "
+        "from a checkpoint. How would you design reducers, checkpoint boundaries, and conflict handling so that "
+        "the result is deterministic?"
+    )
+    shortened = clean_title(question, "https://example.com/interview/x")
+    assert shortened.endswith("…") and len(shortened) <= 161
+    assert question.startswith(shortened[:-1])
+    academic = (
+        "Resume Means Resume: A Machine-Checked Conformance Contract for Checkpoint, Interrupt, and Resume "
+        "Semantics in Workflow Persistence Layers"
+    )
+    assert clean_title(academic, "https://arxiv.org/html/2608.03836v1") == academic
+
+
+def test_the_review_and_report_prompts_guard_against_self_contradicting_sentences():
+    from src.utils.prompts import report_writer_instructions, review_instructions
+
+    assert "framing is contradicted" in review_instructions
+    assert "framing match its evidence" in report_writer_instructions
+
+
+def test_consultancy_hosts_rank_below_ordinary_articles():
+    results = [
+        result("https://simorconsulting.com/blog/vector-database-checklist", 0.7),
+        result("https://example.com/blog/vector-database-checklist", 0.6),
+    ]
+    assert rank_results(results, 2)[0]["url"] == "https://example.com/blog/vector-database-checklist"
+
+
+def test_course_catalog_pages_rank_below_ordinary_articles():
+    results = [
+        result("https://www.coursera.org/learn/multi-agent-systems", 0.7),
+        result("https://udemy.com/course/langgraph", 0.7),
+        result("https://example.com/blog/langgraph-state", 0.6),
+    ]
+    assert rank_results(results, 3)[0]["url"] == "https://example.com/blog/langgraph-state"
+
+
+def test_the_prompts_steer_away_from_catalogs_and_double_claims():
+    from src.utils.prompts import revise_instructions, source_selection_instructions
+
+    assert "course catalogs" in source_selection_instructions
+    assert "never leave the original claim next to its corrected version" in revise_instructions
+
+
 def test_pdf_markers_are_removed_and_do_not_block_url_completion():
     assert clean_title("(PDF) Annual climate report 2025", "https://example.com/x") == "Annual climate report 2025"
     assert clean_title("[PDF] Annual climate report 2025", "https://example.com/x") == "Annual climate report 2025"
