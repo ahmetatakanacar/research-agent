@@ -26,6 +26,7 @@ from src.utils.prompts import (
 )
 from src.utils.ranking import host_of, quality_bonus
 from src.utils.sources import (
+    CITE_RE,
     cited_numbers,
     finalize_citations,
     format_numbered,
@@ -46,6 +47,10 @@ APPROVAL_WORDS = {"perfect", "continue", "approved", "yes", "ok", "okay", "tamam
 REVIEW_SOURCE_CHARS = 60_000
 REVIEW_MAX_ISSUES = 20
 MAX_CITATIONS_PER_STATEMENT = 3
+CITATION_REMINDER = (
+    ". Every claim you restate from the sections must keep its citation marker, such as [1],"
+    " exactly as it appears there."
+)
 
 
 def text_of(message) -> str:
@@ -296,14 +301,22 @@ def write_report(state: ResearchGraphState):
 
 def _intro_or_conclusion(state: ResearchGraphState, request: str) -> str:
     language = normalize_language(state.get("language"))
-    instructions = intro_conclusion_instructions.format(
+    sections = state["merged_sections"]
+    system = SystemMessage(content=intro_conclusion_instructions.format(
         topic=state["topic"],
-        formatted_str_sections="\n\n".join(state["merged_sections"]),
+        formatted_str_sections="\n\n".join(sections),
         introduction_header=label(language, "introduction"),
         conclusion_header=label(language, "conclusion"),
         language_instruction=language_instruction(language),
-    )
-    return text_of(get_llm().invoke([SystemMessage(content=instructions), HumanMessage(content=request)]))
+    ))
+    text = text_of(get_llm().invoke([system, HumanMessage(content=request)]))
+
+    if any(CITE_RE.search(section) for section in sections) and not CITE_RE.search(text):
+        logger.info("Section written without citations; asking once more with a reminder")
+        retried = text_of(get_llm().invoke([system, HumanMessage(content=request + CITATION_REMINDER)]))
+        if CITE_RE.search(retried):
+            return retried
+    return text
 
 
 def write_introduction(state: ResearchGraphState):
