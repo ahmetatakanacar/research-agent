@@ -11,6 +11,55 @@ from src.utils import nodes, tools
 from src.utils.edges import route_after_question, route_messages
 
 
+class ScriptedWriter:
+    def __init__(self, *texts):
+        self.texts = list(texts)
+        self.requests = []
+
+    def invoke(self, messages):
+        self.requests.append(messages[-1].content)
+        return AIMessage(content=self.texts.pop(0))
+
+
+def _closing_state(sections):
+    return {"topic": "Topic", "language": "tr", "merged_sections": sections}
+
+
+def test_a_conclusion_without_citations_is_asked_for_once_more(monkeypatch):
+    writer = ScriptedWriter("## Sonuç\n\nİddia.", "## Sonuç\n\nİddia [1].")
+    monkeypatch.setattr(nodes, "get_llm", lambda: writer)
+    result = nodes.write_conclusion(_closing_state(["## A\n\nVeri [1]."]))
+    assert result == {"conclusion": "## Sonuç\n\nİddia [1]."}
+    assert len(writer.requests) == 2 and "citation marker" in writer.requests[1]
+
+
+def test_a_conclusion_that_stays_uncited_keeps_the_first_answer(monkeypatch):
+    writer = ScriptedWriter("## Sonuç\n\nBir.", "## Sonuç\n\nİki.")
+    monkeypatch.setattr(nodes, "get_llm", lambda: writer)
+    result = nodes.write_conclusion(_closing_state(["## A\n\nVeri [1]."]))
+    assert result == {"conclusion": "## Sonuç\n\nBir."}
+    assert len(writer.requests) == 2
+
+
+def test_cited_or_uncitable_closing_sections_are_written_in_one_call(monkeypatch):
+    writer = ScriptedWriter("## Giriş\n\nİddia [1].")
+    monkeypatch.setattr(nodes, "get_llm", lambda: writer)
+    assert nodes.write_introduction(_closing_state(["## A\n\nVeri [1]."])) == {"introduction": "## Giriş\n\nİddia [1]."}
+    assert len(writer.requests) == 1
+
+    writer = ScriptedWriter("## Giriş\n\nİddia.")
+    monkeypatch.setattr(nodes, "get_llm", lambda: writer)
+    nodes.write_introduction(_closing_state(["## A\n\nKaynak bulunamadı."]))
+    assert len(writer.requests) == 1
+
+
+def test_the_report_prompt_asks_for_theme_sub_headings():
+    from src.utils.prompts import report_writer_instructions
+
+    assert "### sub-headings" in report_writer_instructions
+    assert "no sub-heading" not in report_writer_instructions
+
+
 def test_tavily_search_maps_results_normalizes_options_and_survives_errors(monkeypatch):
     seen = []
 
