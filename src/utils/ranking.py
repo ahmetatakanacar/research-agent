@@ -5,7 +5,9 @@ BLOCKED_DOMAINS = (
     "youtube.com", "youtu.be", "linkedin.com", "facebook.com", "instagram.com", "tiktok.com",
     "x.com", "twitter.com", "pinterest.com", "quora.com", "reddit.com", "vk.com",
     "slideshare.net", "scribd.com", "docs.google.com", "eksisozluk.com",
+    "aka.ms", "bit.ly", "tinyurl.com", "t.co", "goo.gl", "lnkd.in", "ow.ly", "buff.ly",
 )
+REDIRECT_PATHS = ("/fwlink",)
 AUTHORITY_DOMAINS = (
     "arxiv.org", "doi.org", "nature.com", "science.org", "sciencedirect.com", "springer.com",
     "ieee.org", "acm.org", "jstor.org", "oecd.org", "worldbank.org", "un.org", "imf.org",
@@ -22,10 +24,15 @@ TITLE_DASHES = (" — ", " – ", " - ", " · ")
 TITLE_ACRONYMS = frozenset({"ai", "llm", "llms", "api", "apis", "ui", "ux", "ml", "sql", "aws", "gpu", "cpu", "sdk", "mcp", "a2a", "rag"})
 MIN_TITLE_LENGTH = 8
 MIN_TRIMMED_WORDS = 3
+MIN_HOST_LETTERS = 6
+MAX_TITLE_LENGTH = 160
+SPACE_AFTER_COMMA = re.compile(r"([,;])(?=[^\W\d_])")
 PDF_MARKER = re.compile(r"^[(\[]\s*pdf\s*[)\]]\s*", re.IGNORECASE)
-CUT_OFF = re.compile(r"\s+(?:\.{3}|…)$")
+CUT_OFF = re.compile(r"(?:\s+\.{3}|\s*…)$")
+TRAILING_PERIOD = re.compile(r"(?<=[^\W\d_]{4})\.$")
 DANGLING_WORDS = frozenset({
     "a", "an", "and", "or", "of", "the", "in", "on", "for", "to", "with", "by", "at", "from", "vs", "&",
+    "via", "using", "through", "into", "as", "than", "is", "are", "randomized", "randomised", "controlled",
     "ve", "ile", "için", "bir", "bu", "de", "da", "ki",
 })
 
@@ -36,6 +43,8 @@ MARKETING_PATHS = ("/services", "/solutions", "/pricing", "/hire", "/consulting"
 MARKETING_TITLE = re.compile(
     r"development (?:company|services|agency)|consulting|outsourc|hire (?:dedicated|expert|top)|\bagency\b", re.IGNORECASE
 )
+CATALOG_DOMAINS = ("coursera.org", "udemy.com", "udacity.com", "skillshare.com", "oboe.com")
+MARKETING_HOST = re.compile(r"consulting|consultancy|agency|outsourc")
 IP_ADDRESS = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
 AUTHORITY_BONUS = 0.25
@@ -70,6 +79,7 @@ def is_blocked(url: str) -> bool:
         or host.rsplit(".", 1)[-1] in FREE_TLDS
         or bool(IP_ADDRESS.match(host))
         or port not in STANDARD_PORTS
+        or urlparse(url).path.lower().startswith(REDIRECT_PATHS)
     )
 
 
@@ -97,8 +107,14 @@ def _relevance(result: dict) -> float:
 
 
 def _marketing_penalty(result: dict) -> float:
-    path = urlparse(str(result["url"])).path.lower()
-    if path.startswith(MARKETING_PATHS) or MARKETING_TITLE.search(str(result.get("title") or "")):
+    url = str(result["url"])
+    path = urlparse(url).path.lower()
+    if (
+        path.startswith(MARKETING_PATHS)
+        or _matches(host_of(url), CATALOG_DOMAINS)
+        or MARKETING_HOST.search(host_of(url))
+        or MARKETING_TITLE.search(str(result.get("title") or ""))
+    ):
         return MARKETING_PENALTY
     return 0.0
 
@@ -139,12 +155,14 @@ def _letters(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
-def _is_site_tail(tail: str, host_labels: list[str]) -> bool:
+def _is_site_tail(tail: str, host_labels: list[str], host_letters: str = "") -> bool:
     words = {word.strip(",.").lower() for word in tail.split()}
+    tail_letters = _letters(tail)
     return (
         tail.strip().lower() in GENERIC_TITLE_TAILS
         or bool(words & TAGLINE_WORDS)
-        or any(label in _letters(tail) for label in host_labels)
+        or any(label in tail_letters for label in host_labels)
+        or (len(host_letters) >= MIN_HOST_LETTERS and host_letters in tail_letters)
     )
 
 
@@ -193,8 +211,15 @@ def _trim_cut_off(title: str) -> str:
     return " ".join(words).rstrip(",:;-–— ")
 
 
+def _shorten(title: str) -> str:
+    if len(title) <= MAX_TITLE_LENGTH:
+        return title
+    head = title[:MAX_TITLE_LENGTH].rsplit(" ", 1)[0].rstrip(" :;,.-–—")
+    return head + "…"
+
+
 def clean_title(title: str, url: str) -> str:
-    cleaned = " ".join(title.split())
+    cleaned = SPACE_AFTER_COMMA.sub(r"\1 ", " ".join(title.split()))
     unmarked = PDF_MARKER.sub("", cleaned)
     if len(unmarked) >= MIN_TITLE_LENGTH:
         cleaned = unmarked
@@ -206,14 +231,20 @@ def clean_title(title: str, url: str) -> str:
         if len(head) >= MIN_TITLE_LENGTH:
             cleaned = head
 
-    host_labels = [label for label in host_of(url).split(".")[:-1] if len(label) >= 4]
+    host = host_of(url)
+    host_labels = [label for label in host.split(".")[:-1] if len(label) >= 4]
+    host_letters = _letters(host)
     stripped = True
     while stripped:
         stripped = False
         for dash in TITLE_DASHES:
             head, found, tail = cleaned.rpartition(dash)
-            if found and len(head.strip()) >= MIN_TITLE_LENGTH and _is_site_tail(tail, host_labels):
+            if not found or len(head.strip()) < MIN_TITLE_LENGTH:
+                continue
+            repeated = tail.strip().lower() == head.rpartition(dash)[2].strip().lower()
+            if repeated or _is_site_tail(tail, host_labels, host_letters):
                 cleaned = head.strip()
                 stripped = True
                 break
-    return _trim_cut_off(_complete_truncated(cleaned, url))
+    completed = _trim_cut_off(_complete_truncated(cleaned, url)).rstrip(" :;,")
+    return _shorten(TRAILING_PERIOD.sub("", completed))
