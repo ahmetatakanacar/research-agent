@@ -1,165 +1,379 @@
+import logging
+from itertools import zip_longest
+
 from dotenv import load_dotenv
-from src.utils.states import GenerateAnalystState, InterviewState, ResearchGraphState
-from src.utils.models import llm
-from src.utils.objects import Analyst, Perpectives, SearchQuery
-from src.utils.prompts import analyst_instructions, question_instructions, search_instructions, answer_instructions, section_writer_instructions
-from src.utils.prompts import report_writer_instructions, intro_conclusion_instructions
-from langchain.messages import SystemMessage, HumanMessage
-from langgraph.types import interrupt
-from src.utils.tools import tavily_search, wikipedia_search
+from langchain.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages import get_buffer_string
+from langgraph.config import get_stream_writer
+from langgraph.types import interrupt
+
+from src.settings import SEARCH_CANDIDATES, SEARCH_DEPTH, SEARCH_RESULTS
+from src.utils.languages import label, language_instruction, language_name, normalize_language
+from src.utils.models import get_fast_llm, get_llm
+from src.utils.objects import Analyst, Perpectives, ReviewResult, SearchQuery, SourcePicks
+from src.utils.prompts import (
+    analyst_instructions,
+    answer_instructions,
+    current_analysts_block,
+    intro_conclusion_instructions,
+    question_instructions,
+    report_writer_instructions,
+    review_instructions,
+    revise_instructions,
+    search_instructions,
+    section_writer_instructions,
+    source_selection_instructions,
+)
+from src.utils.ranking import host_of, quality_bonus
+from src.utils.sources import (
+    cited_numbers,
+    finalize_citations,
+    format_numbered,
+    merge_sections,
+    sources_markdown,
+    strip_sources_section,
+    tidy_citations,
+    unique_documents,
+)
+from src.utils.states import GenerateAnalystState, InterviewState, ResearchGraphState
+from src.utils.tools import tavily_search, wikipedia_search
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+APPROVAL_WORDS = {"perfect", "continue", "approved", "yes", "ok", "okay", "tamam", "evet", "onay"}
+REVIEW_SOURCE_CHARS = 60_000
+REVIEW_MAX_ISSUES = 20
+MAX_CITATIONS_PER_STATEMENT = 3
+
+
+def text_of(message) -> str:
+    content = getattr(message, "content", message)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part if isinstance(part, str) else str(part.get("text", ""))
+            for part in content
+            if isinstance(part, (str, dict))
+        )
+    return str(content or "")
+
+
+def _writer():
+    try:
+        return get_stream_writer()
+    except Exception:
+        return lambda _payload: None
+
+
+def _analyst(value) -> Analyst:
+    return Analyst.model_validate(value) if isinstance(value, dict) else value
+
+
+def _opt(state, key: str, default=None):
+    return (state.get("options") or {}).get(key, default)
+
+
+def _language(state) -> str:
+    return normalize_language(_opt(state, "language"))
+
+
+def _query(state) -> str:
+    return (state.get("search_query") or "").strip()
+
 
 def create_analyst(state: GenerateAnalystState):
 
     topic = state["topic"]
     max_analyst = state["max_analyst"]
-    human_analyst_feedback = state.get("human_analyst_feedback", "")
+    language = normalize_language(state.get("language"))
+    feedback = state.get("human_analyst_feedback") or ""
+    current = [_analyst(a) for a in state.get("analysts") or []]
 
-    structured_llm = llm.with_structured_output(Perpectives, method="function_calling")
-    system_message = analyst_instructions.format(topic=topic, human_analyst_feedback=human_analyst_feedback, max_analyst=max_analyst)
-    analyst = structured_llm.invoke([SystemMessage(content=system_message)] + [HumanMessage(content="Please generate the set of analyst.")])
-    
-    return {"analysts": analyst.analyst}
+    current_block = ""
+    if feedback and current:
+        current_block = current_analysts_block.format(analysts="\n\n".join(a.persona for a in current))
+
+    structured_llm = get_llm().with_structured_output(Perpectives, method="function_calling")
+    system_message = analyst_instructions.format(
+        topic=topic,
+        human_analyst_feedback=feedback,
+        current_analysts=current_block,
+        max_analyst=max_analyst,
+        language_instruction=language_instruction(language),
+    )
+    result = structured_llm.invoke(
+        [SystemMessage(content=system_message), HumanMessage(content="Please generate the set of analyst.")]
+    )
+
+    return {"analysts": list(result.analyst)[:max_analyst]}
+
 
 def human_feedback(state: GenerateAnalystState):
     feedback = interrupt({
         "question": "Are these analysts okay?",
         "analysts": [
             analyst.model_dump() if hasattr(analyst, "model_dump") else analyst
-                for analyst in state.get("analysts", [])
+            for analyst in state.get("analysts", [])
         ],
-        "instructions": "Return feedback to regenerate analysts, or return empty/perfect/continue to approve."
+        "instructions": "Return feedback to regenerate analysts, or return empty/perfect/continue to approve.",
     })
 
-    if feedback is None:
-        return {"human_analyst_feedback": None}
-    if isinstance(feedback, str):
-        feedback = feedback.strip()
+    update: dict = {}
 
-        if feedback == "":
-            return {"human_analyst_feedback": None}
-        if feedback.lower() in {"perfect", "continue", "approved", "yes"}:
-            return {"human_analyst_feedback": None}
-        return {"human_analyst_feedback": feedback}
+    if isinstance(feedback, dict):
+        edited = feedback.get("analysts")
+        feedback = feedback.get("feedback")
+        if edited:
+            try:
+                update["analysts"] = [Analyst.model_validate(a) for a in edited]
+            except Exception:
+                logger.warning("Ignoring invalid analyst edits", exc_info=True)
 
-    return {"human_analyst_feedback": None}
+    text = feedback.strip() if isinstance(feedback, str) else ""
+    update["human_analyst_feedback"] = None if not text or text.lower() in APPROVAL_WORDS else text
+    return update
+
 
 def generate_question(state: InterviewState):
 
-    analyst = state["analyst"]
-    if isinstance(analyst, dict):
-        analyst = Analyst.model_validate(analyst)
+    analyst = _analyst(state["analyst"])
+    language = _language(state)
 
-    messages = state["messages"]
-    system_message = question_instructions.format(goals=analyst.persona)
-    question = llm.invoke([SystemMessage(content=system_message)] + messages)
+    if len(state["messages"]) == 1:
+        _writer()({"interview": {"analyst": analyst.name, "role": analyst.role}})
+
+    system_message = question_instructions.format(
+        goals=analyst.persona,
+        closing=label(language, "closing"),
+        language_instruction=language_instruction(language),
+    )
+    question = get_llm().invoke([SystemMessage(content=system_message)] + state["messages"])
 
     return {"messages": [question]}
 
+
+def generate_search_query(state: InterviewState):
+    language = _language(state)
+    structured_llm = get_fast_llm().with_structured_output(SearchQuery, method="function_calling")
+    system_message = SystemMessage(content=search_instructions.format(language=language_name(language)))
+
+    result = structured_llm.invoke([system_message] + state["messages"])
+
+    fallback = text_of(state["messages"][-1]).strip()[:200]
+    query = (getattr(result, "search_query", "") or "").strip() or fallback
+    english = (getattr(result, "english_query", "") or "").strip()
+    return {"search_query": query, "english_query": english}
+
+
+def curate_sources(docs: list, query: str, limit: int) -> list:
+    if len(docs) <= limit:
+        return docs
+    listing = "\n\n".join(
+        f"[{i}] {doc['title']} — {host_of(doc['url'])}\n{doc['content'][:300]}" for i, doc in enumerate(docs, 1)
+    )
+    try:
+        picker = get_fast_llm().with_structured_output(SourcePicks, method="function_calling")
+        picks = picker.invoke([SystemMessage(content=source_selection_instructions.format(
+            query=query, limit=limit, candidates=listing,
+        ))])
+        order = [n for n in dict.fromkeys(picks.best) if 1 <= n <= len(docs)]
+    except Exception:
+        logger.warning("Source selection failed; keeping the ranked order", exc_info=True)
+        return docs[:limit]
+
+    return [docs[n - 1] for n in order[:limit]] or docs[:limit]
+
+
 def search_web(state: InterviewState):
+    query = _query(state)
+    english = (state.get("english_query") or "").strip()
+    queries = [query]
+    if _language(state) != "en" and english and english.lower() != query.lower():
+        queries.append(english)
 
-    structured_llm = llm.with_structured_output(SearchQuery, method="function_calling")
-    search_instruction_system_message = SystemMessage(content=search_instructions)
+    found = [tavily_search(q, SEARCH_DEPTH, SEARCH_CANDIDATES) for q in queries]
+    candidates: list = []
+    seen: set[str] = set()
+    for doc in (doc for group in zip_longest(*found) for doc in group if doc):
+        if doc["url"] not in seen:
+            seen.add(doc["url"])
+            candidates.append(doc)
+    return {"context": curate_sources(candidates, query, SEARCH_RESULTS)}
 
-    search_query = structured_llm.invoke([search_instruction_system_message] + state["messages"])
-
-    return {"context": [tavily_search(search_query.search_query)]}
 
 def search_wikipedia(state: InterviewState):
+    return {"context": wikipedia_search(_query(state), lang=_language(state))}
 
-    structured_llm = llm.with_structured_output(SearchQuery, method="function_calling")
-    search_instruction_system_message = SystemMessage(content=search_instructions)
-
-    search_query = structured_llm.invoke([search_instruction_system_message] + state["messages"])
-
-    return {"context": [wikipedia_search(search_query.search_query)]}
 
 def generate_answer(state: InterviewState):
 
-    analyst = state["analyst"]
-    messages = state["messages"]
-    context = state["context"]
+    analyst = _analyst(state["analyst"])
+    language = _language(state)
+    docs = unique_documents(state.get("context"))
 
-    if isinstance(analyst, dict):
-        analyst = Analyst.model_validate(analyst)
+    if not docs:
+        return {"messages": [AIMessage(content=label(language, "no_sources"), name="expert")]}
 
-    system_message = answer_instructions.format(goals=analyst.persona, context=context)
-    answer = llm.invoke([SystemMessage(content=system_message)] + messages)
+    system_message = answer_instructions.format(
+        goals=analyst.persona,
+        context=format_numbered(docs),
+        language_instruction=language_instruction(language),
+    )
+    answer = get_llm().invoke([SystemMessage(content=system_message)] + state["messages"])
     answer.name = "expert"
 
     return {"messages": [answer]}
 
+
 def save_interview(state: InterviewState):
 
-    messages = state["messages"]
-    interview = get_buffer_string(messages)
+    interview = get_buffer_string(state["messages"])
 
     return {"interview": interview}
 
+
 def write_section(state: InterviewState):
 
-    interview = state["interview"]
-    context = state["context"]
-    analyst = state["analyst"]
+    analyst = _analyst(state["analyst"])
+    language = _language(state)
+    docs = unique_documents(state.get("context"))
 
-    if isinstance(analyst, dict):
-        analyst = Analyst.model_validate(analyst)
+    if not docs:
+        text = f"## {analyst.role}\n\n### {label(language, 'summary')}\n\n{label(language, 'no_sources_section')}"
+        return {
+            "sections": [{"analyst": analyst.name, "text": text, "sources": []}],
+            "warnings": [{"code": "no_sources", "analyst": analyst.name}],
+        }
 
-    system_message = section_writer_instructions.format(focus=analyst.description)
-    section = llm.invoke([SystemMessage(content=system_message)] + 
-                         [HumanMessage(content=f"Use this source to write your section: {context}")])
+    system_message = section_writer_instructions.format(
+        focus=analyst.description,
+        summary_header=label(language, "summary"),
+        language_instruction=language_instruction(language),
+    )
+    request = (
+        f"Interview:\n{state['interview']}\n\n"
+        f"Numbered sources:\n{format_numbered(docs)}\n\n"
+        "Use them to write your section."
+    )
+    section = get_llm().invoke([SystemMessage(content=system_message), HumanMessage(content=request)])
 
-    return {"sections": [section.content]}
+    return {"sections": [{"analyst": analyst.name, "text": text_of(section), "sources": docs}]}
+
+
+def merge_sources(state: ResearchGraphState):
+    merged, sources = merge_sections(state.get("sections") or [])
+    return {"merged_sections": merged, "sources": sources}
+
 
 def write_report(state: ResearchGraphState):
 
-    sections = state["sections"]
-    topic = state["topic"]
+    language = normalize_language(state.get("language"))
+    formatted_str_sections = "\n\n".join(state["merged_sections"])
 
-    formatted_str_sections = "\n\n".join([f"{section}" for section in sections])
+    system_message = report_writer_instructions.format(
+        topic=state["topic"],
+        context=formatted_str_sections,
+        insights_header=label(language, "insights"),
+        language_instruction=language_instruction(language),
+    )
 
-    system_message = report_writer_instructions.format(topic=topic, context=formatted_str_sections)    
-    report = llm.invoke([SystemMessage(content=system_message)]+[HumanMessage(content=f"Write a report based upon these memos.")]) 
-    return {"content": report.content}
+    write = _writer()
+    parts: list[str] = []
+    for chunk in get_llm().stream([
+        SystemMessage(content=system_message),
+        HumanMessage(content="Write a report based upon these memos."),
+    ]):
+        piece = text_of(chunk)
+        if piece:
+            parts.append(piece)
+            write({"draft": piece})
+
+    return {"content": "".join(parts)}
+
+
+def _intro_or_conclusion(state: ResearchGraphState, request: str) -> str:
+    language = normalize_language(state.get("language"))
+    instructions = intro_conclusion_instructions.format(
+        topic=state["topic"],
+        formatted_str_sections="\n\n".join(state["merged_sections"]),
+        introduction_header=label(language, "introduction"),
+        conclusion_header=label(language, "conclusion"),
+        language_instruction=language_instruction(language),
+    )
+    return text_of(get_llm().invoke([SystemMessage(content=instructions), HumanMessage(content=request)]))
+
 
 def write_introduction(state: ResearchGraphState):
+    return {"introduction": _intro_or_conclusion(state, "Write the report introduction")}
 
-    sections = state["sections"]
-    topic = state["topic"]
-
-    formatted_str_sections = "\n\n".join([f"{section}" for section in sections])
-    
-    instructions = intro_conclusion_instructions.format(topic=topic, formatted_str_sections=formatted_str_sections)    
-    intro = llm.invoke([SystemMessage(content=instructions)]+[HumanMessage(content=f"Write the report introduction")]) 
-    return {"introduction": intro.content}
 
 def write_conclusion(state: ResearchGraphState):
+    return {"conclusion": _intro_or_conclusion(state, "Write the report conclusion")}
 
-    sections = state["sections"]
-    topic = state["topic"]
 
-    formatted_str_sections = "\n\n".join([f"{section}" for section in sections])
+def _sources_for_review(sources: list[dict]) -> str:
+    per_source = max(500, REVIEW_SOURCE_CHARS // max(1, len(sources)))
+    return "\n\n---\n\n".join(
+        f"[{s['n']}] {s['title']} — {s['url']}\n{str(s.get('content') or '')[:per_source]}" for s in sources
+    )
 
-    instructions = intro_conclusion_instructions.format(topic=topic, formatted_str_sections=formatted_str_sections)    
-    conclusion = llm.invoke([SystemMessage(content=instructions)]+[HumanMessage(content=f"Write the report conclusion")]) 
-    return {"conclusion": conclusion.content}
+
+def review_report(state: ResearchGraphState):
+    language = normalize_language(state.get("language"))
+    content = state["content"]
+    cited = cited_numbers(content)
+    sources = [s for s in state.get("sources") or [] if s["n"] in cited]
+    if not sources:
+        return {"review_notes": []}
+
+    try:
+        checker = get_llm().with_structured_output(ReviewResult, method="function_calling")
+        result = checker.invoke([SystemMessage(content=review_instructions.format(
+            language=language_name(language), report=content, sources=_sources_for_review(sources),
+        ))])
+        issues = [issue.model_dump() for issue in (result.issues if result else [])][:REVIEW_MAX_ISSUES]
+        if not issues:
+            return {"review_notes": []}
+
+        revised = text_of(get_llm().invoke([
+            SystemMessage(content=revise_instructions.format(
+                issues="\n".join(f"- {i['claim']} -> {i['problem']}" for i in issues),
+                report=content,
+                language_instruction=language_instruction(language),
+            )),
+            HumanMessage(content="Return the corrected report."),
+        ])).strip()
+    except Exception:
+        logger.warning("Fact-check failed; keeping the unreviewed draft", exc_info=True)
+        return {"review_notes": [], "warnings": [{"code": "review_failed"}]}
+
+    fixed = bool(revised) and len(revised) >= 0.5 * len(content)
+    return {
+        "content": revised if fixed else content,
+        "review_notes": [{**issue, "fixed": fixed} for issue in issues],
+    }
+
 
 def finalize_report(state: ResearchGraphState):
 
-    content = state["content"]
-    if content.startswith("## Insights"):
-        content = content.removeprefix("## Insights")
-    if "## Sources" in content:
-        try:
-            content, sources = content.split("\n## Sources\n")
-        except:
-            sources = None
-    else:
-        sources = None
+    language = normalize_language(state.get("language"))
+    parts = [
+        strip_sources_section(state["introduction"].strip()),
+        strip_sources_section(state["content"].strip()),
+        strip_sources_section(state["conclusion"].strip()),
+    ]
+    sources = state.get("sources") or []
+    authority = {source["n"]: quality_bonus(source["url"]) for source in sources}
+    capped = [tidy_citations(part, MAX_CITATIONS_PER_STATEMENT, lambda n: authority.get(n, 0.0)) for part in parts]
+    renumbered, used = finalize_citations(capped, sources)
+    introduction, content, conclusion = (tidy_citations(part) for part in renumbered)
 
-    final_report = state["introduction"] + "\n\n---\n\n" + content + "\n\n---\n\n" + state["conclusion"]
-    if sources is not None:
-        final_report += "\n\n## Sources\n" + sources
-    return {"final_report": final_report}
+    final_report = introduction + "\n\n---\n\n" + content + "\n\n---\n\n" + conclusion
+    sources_section = sources_markdown(used, label(language, "sources"))
+    if sources_section:
+        final_report += "\n\n" + sources_section
+
+    return {"final_report": final_report, "final_sources": used}
