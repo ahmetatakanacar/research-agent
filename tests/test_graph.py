@@ -1,0 +1,258 @@
+import fakes
+import pytest
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.types import Command
+
+from src.agent import builder
+
+BASE = {"topic": "urban forests", "max_analyst": 2, "language": "en", "max_num_turns": 2}
+
+
+def make_graph():
+    saver = MemorySaver(serde=JsonPlusSerializer(allowed_msgpack_modules=[("src.utils.objects", "Analyst")]))
+    return builder.compile(checkpointer=saver)
+
+
+def start(graph, extra=None, thread="t1"):
+    config = {"configurable": {"thread_id": thread}}
+    result = graph.invoke({**BASE, **(extra or {})}, config)
+    assert "__interrupt__" in result, "the run must pause for team approval"
+    return config, result
+
+
+def approve(graph, config, resume=""):
+    return graph.invoke(Command(resume=resume), config)
+
+
+def test_full_run_builds_numbered_sources_in_code(llm):
+    graph = make_graph()
+    config, paused = start(graph)
+    assert [a.name for a in paused["analysts"]] == ["Analyst 1", "Analyst 2"]
+
+    final = approve(graph, config)
+    report = final["final_report"]
+
+    assert report.startswith("# Big Title")
+    assert "## Introduction" in report and "## Insights" in report and "## Conclusion" in report
+    assert "## Sources" in report
+
+    sources = final["final_sources"]
+    numbers = [s["n"] for s in sources]
+    assert numbers == list(range(1, len(numbers) + 1))
+    from src.utils.sources import cited_numbers
+
+    assert cited_numbers(report.split("## Sources")[0]) == set(numbers)
+    assert "[9]" not in report
+    assert sum(s["url"] == "https://example.com/shared" for s in sources) <= 1
+
+
+def test_each_turn_generates_one_search_query(llm):
+    graph = make_graph()
+    config, _ = start(graph)
+    approve(graph, config)
+    assert llm.calls.count("query") == 4
+    assert llm.calls.count("answer") == 4
+
+
+def test_regenerate_uses_feedback_then_approve(llm):
+    graph = make_graph()
+    config, _ = start(graph)
+
+    paused = approve(graph, config, resume="add an economist")
+    assert "__interrupt__" in paused
+    assert all("revised: add an economist" in a.description for a in paused["analysts"])
+
+    final = approve(graph, config)
+    assert final["final_report"]
+
+
+def test_user_edits_replace_the_team(llm):
+    graph = make_graph()
+    config, _ = start(graph)
+
+    edited = [{"name": "Dr. Edit", "role": "Economist", "affiliation": "Bank", "description": "Costs"}]
+    final = approve(graph, config, resume={"feedback": "", "analysts": edited})
+
+    assert [a.name for a in final["analysts"]] == ["Dr. Edit"]
+    assert len(final["sections"]) == 1
+
+
+def test_every_question_searches_web_and_wikipedia_with_one_query(llm, monkeypatch):
+    queries = {"web": [], "wikipedia": []}
+
+    def web(query, *args, **kwargs):
+        queries["web"].append(query)
+        return fakes.fake_tavily(query)
+
+    def wiki(query, *args, **kwargs):
+        queries["wikipedia"].append(query)
+        return fakes.fake_wikipedia(query)
+
+    monkeypatch.setattr("src.utils.nodes.tavily_search", web)
+    monkeypatch.setattr("src.utils.nodes.wikipedia_search", wiki)
+    graph = make_graph()
+    config, _ = start(graph, {"max_analyst": 1})
+    final = approve(graph, config)
+
+    assert queries["web"] and queries["web"] == queries["wikipedia"]
+    assert llm.calls.count("query") == len(queries["web"])
+    retrieved = {doc["kind"] for section in final["sections"] for doc in section["sources"]}
+    assert retrieved == {"web", "wikipedia"}
+
+
+def test_web_candidates_are_narrowed_to_the_best_five_each_turn(llm, monkeypatch):
+    requested = []
+
+    def web(query, search_depth="basic", max_results=3):
+        requested.append(max_results)
+        return [
+            {"url": f"https://site{i}.org/{len(requested)}", "title": f"Page {i}", "content": "Text.", "kind": "web"}
+            for i in range(1, 9)
+        ]
+
+    monkeypatch.setattr("src.utils.nodes.tavily_search", web)
+    graph = make_graph()
+    config, _ = start(graph, {"max_analyst": 1})
+    final = approve(graph, config)
+
+    assert requested == [10, 10]
+    assert llm.calls.count("select") == 2
+    web_docs = [d for d in final["sections"][0]["sources"] if d["kind"] == "web"]
+    assert len(web_docs) == 10  # five per turn, two turns
+
+
+def test_a_non_english_report_also_searches_the_web_in_english(llm, monkeypatch):
+    queries = []
+
+    def web(query, search_depth="basic", max_results=3):
+        queries.append(query)
+        return fakes.fake_tavily(query)
+
+    monkeypatch.setattr("src.utils.nodes.tavily_search", web)
+    graph = make_graph()
+    config, _ = start(graph, {"max_analyst": 1, "language": "tr", "max_num_turns": 1})
+    approve(graph, config)
+
+    assert len(queries) == 2
+    assert queries[0].startswith("query ") and queries[1].startswith("english ")
+
+
+def test_an_english_report_searches_the_web_once_per_turn(llm, monkeypatch):
+    queries = []
+
+    def web(query, search_depth="basic", max_results=3):
+        queries.append(query)
+        return fakes.fake_tavily(query)
+
+    monkeypatch.setattr("src.utils.nodes.tavily_search", web)
+    graph = make_graph()
+    config, _ = start(graph, {"max_analyst": 1, "language": "en", "max_num_turns": 1})
+    approve(graph, config)
+    assert len(queries) == 1
+
+
+def test_no_sources_gives_honest_placeholder_and_warning(llm, monkeypatch):
+    monkeypatch.setattr("src.utils.nodes.tavily_search", fakes.empty_search)
+    monkeypatch.setattr("src.utils.nodes.wikipedia_search", fakes.empty_search)
+    graph = make_graph()
+    config, _ = start(graph)
+    final = approve(graph, config)
+
+    assert {w["code"] for w in final["warnings"]} == {"no_sources"}
+    assert len(final["warnings"]) == 2
+    assert llm.calls.count("answer") == 0
+    assert "## Sources" not in final["final_report"]
+    assert "[1]" not in final["final_report"]
+
+
+def test_analyst_closing_sentence_ends_the_interview_early(llm):
+    llm.close_after = 1
+    graph = make_graph()
+    config, _ = start(graph, {"max_num_turns": 4, "max_analyst": 1})
+    approve(graph, config)
+    assert llm.calls.count("answer") == 1
+
+
+def test_max_num_turns_is_respected(llm):
+    graph = make_graph()
+    config, _ = start(graph, {"max_num_turns": 3, "max_analyst": 1})
+    approve(graph, config)
+    assert llm.calls.count("answer") == 3
+
+
+def test_fact_check_fixes_flagged_claims(llm):
+    llm.review_issues = [{"claim": "Another point", "problem": "not in the source"}]
+    graph = make_graph()
+    config, _ = start(graph)
+    final = approve(graph, config)
+
+    assert final["review_notes"] == [{"claim": "Another point", "problem": "not in the source", "fixed": True}]
+    assert "Another point" not in final["final_report"]
+    assert "revise" in llm.calls
+
+
+def test_fact_check_clean_report_is_untouched(llm):
+    graph = make_graph()
+    config, _ = start(graph)
+    final = approve(graph, config)
+    assert final["review_notes"] == []
+    assert "revise" not in llm.calls
+
+
+def test_fact_check_failure_keeps_report_and_warns(llm):
+    llm.fail_on = "review"
+    graph = make_graph()
+    config, _ = start(graph)
+    final = approve(graph, config)
+
+    assert final["final_report"]
+    assert {"code": "review_failed"} in final["warnings"]
+
+
+def test_every_report_is_fact_checked(llm):
+    graph = make_graph()
+    config, _ = start(graph)
+    approve(graph, config)
+    assert "review" in llm.calls
+
+
+def test_report_draft_is_streamed(llm):
+    graph = make_graph()
+    config, _ = start(graph)
+    drafts = []
+    for _, mode, payload in graph.stream(Command(resume=""), config, stream_mode=["updates", "custom"], subgraphs=True):
+        if mode == "custom" and "draft" in payload:
+            drafts.append(payload["draft"])
+    assert "".join(drafts).startswith("## Insights")
+
+
+def test_turkish_report_uses_localized_labels(llm):
+    graph = make_graph()
+    config, _ = start(graph, {"language": "tr", "max_analyst": 1})
+    final = approve(graph, config)
+    assert "## Kaynaklar" in final["final_report"]
+
+
+def test_wikipedia_gets_the_report_language(llm, monkeypatch):
+    langs = []
+    monkeypatch.setattr(
+        "src.utils.nodes.wikipedia_search",
+        lambda query, lang="en", **k: langs.append(lang) or fakes.fake_wikipedia(query, lang),
+    )
+    graph = make_graph()
+    config, _ = start(graph, {"language": "tr", "max_analyst": 1})
+    approve(graph, config)
+    assert set(langs) == {"tr"}
+
+
+@pytest.mark.parametrize("graph_name", ["question_answer_graph", "create_analysts", "research_agent"])
+def test_studio_graphs_compile(graph_name):
+    import json
+    from importlib import import_module
+    from pathlib import Path
+
+    spec = json.loads((Path(__file__).resolve().parent.parent / "langgraph.json").read_text())["graphs"][graph_name]
+    module_path, attribute = spec.removeprefix("./").split(":")
+    module = import_module(module_path.removesuffix(".py").replace("/", "."))
+    assert getattr(module, attribute) is not None
