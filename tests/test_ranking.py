@@ -109,7 +109,6 @@ def test_meaningful_titles_are_kept():
     for title, url in (
         ("LangGraph Multi-Agent — Supervisor Pattern Guide (2026)", "https://myengineeringpath.dev/x"),
         ("Safe to Resume? Breaking Execution Continuity via Rollback", "https://arxiv.org/html/2608.29381v1"),
-        ("State Management in LangGraph: The Foundation of ...", "https://medium.com/algomart/x"),
         ("Docs - A", "https://example.com/x"),
         ("A", "https://a"),
     ):
@@ -131,12 +130,36 @@ def test_truncated_titles_are_completed_from_the_url():
         assert clean_title(title, url) == expected
 
 
-def test_truncated_titles_are_left_alone_when_the_url_does_not_match():
+def test_truncated_titles_the_url_cannot_complete_lose_the_ellipsis_and_dangling_words():
+    cases = [
+        ("State Management in LangGraph: The Foundation of ...", "https://medium.com/algomart/x",
+         "State Management in LangGraph: The Foundation"),
+        ("Security of large language models and ...", "https://www.researchgate.net/publication/1_x",
+         "Security of large language models"),
+        ("Something Different Here ...", "https://example.com/blog/unrelated-slug-here", "Something Different Here"),
+        ("Yapay zeka ajanları ve …", "https://example.com/x", "Yapay zeka ajanları"),
+    ]
+    for title, url, expected in cases:
+        assert clean_title(title, url) == expected
+
+
+def test_titles_that_would_become_stubs_or_are_not_cut_off_are_left_alone():
     for title, url in (
-        ("Something Different ...", "https://example.com/blog/unrelated-slug-here"),
+        ("Too short ...", "https://example.com/x"),
         ("Complete title...", "https://example.com/x"),
+        ("What is this and why...", "https://example.com/x"),
     ):
         assert clean_title(title, url) == title
+
+
+def test_pdf_markers_are_removed_and_do_not_block_url_completion():
+    assert clean_title("(PDF) Annual climate report 2025", "https://example.com/x") == "Annual climate report 2025"
+    assert clean_title("[PDF] Annual climate report 2025", "https://example.com/x") == "Annual climate report 2025"
+    assert clean_title("(PDF)", "https://example.com/x") == "(PDF)"
+    assert clean_title(
+        "(PDF) Security of large language models and ...",
+        "https://www.researchgate.net/publication/9_Security_of_large_language_models_and_defence_strategies",
+    ) == "Security of large language models and Defence Strategies"
 
 
 def test_an_authoritative_domain_gets_no_bonus_when_the_page_is_barely_relevant():
