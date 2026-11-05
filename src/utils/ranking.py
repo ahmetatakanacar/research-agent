@@ -1,0 +1,189 @@
+import re
+from urllib.parse import urlparse
+
+BLOCKED_DOMAINS = (
+    "youtube.com", "youtu.be", "linkedin.com", "facebook.com", "instagram.com", "tiktok.com",
+    "x.com", "twitter.com", "pinterest.com", "quora.com", "reddit.com", "vk.com",
+    "slideshare.net", "scribd.com", "docs.google.com", "eksisozluk.com",
+)
+AUTHORITY_DOMAINS = (
+    "arxiv.org", "doi.org", "nature.com", "science.org", "sciencedirect.com", "springer.com",
+    "ieee.org", "acm.org", "jstor.org", "oecd.org", "worldbank.org", "un.org", "imf.org",
+    "europa.eu", "w3.org", "ietf.org", "iso.org", "readthedocs.io", "britannica.com",
+    "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk",
+)
+AUTHORITY_LABELS = frozenset({"gov", "edu", "ac", "mil", "int"})
+DOCS_SUBDOMAINS = frozenset({"docs", "developer", "developers", "documentation", "learn"})
+DOCS_PATHS = ("/docs", "/documentation")
+
+GENERIC_TITLE_TAILS = frozenset({"articles", "article", "blog", "docs", "documentation", "news", "home", "resources"})
+TAGLINE_WORDS = frozenset({"leader", "speaker", "advisor", "consultant", "founder"})
+TITLE_DASHES = (" — ", " – ", " - ", " · ")
+TITLE_ACRONYMS = frozenset({"ai", "llm", "llms", "api", "apis", "ui", "ux", "ml", "sql", "aws", "gpu", "cpu", "sdk", "mcp", "a2a", "rag"})
+MIN_TITLE_LENGTH = 8
+
+LOW_TRUST_DOMAINS = ("cloudns.asia", "cloudns.net", "duckdns.org", "no-ip.org", "ddns.net", "dynu.net")
+FREE_TLDS = frozenset({"tk", "ml", "ga", "cf", "gq"})
+STANDARD_PORTS = (None, 80, 443)
+MARKETING_PATHS = ("/services", "/solutions", "/pricing", "/hire", "/consulting", "/agency", "/company", "/contact")
+MARKETING_TITLE = re.compile(
+    r"development (?:company|services|agency)|consulting|outsourc|hire (?:dedicated|expert|top)|\bagency\b", re.IGNORECASE
+)
+IP_ADDRESS = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+
+AUTHORITY_BONUS = 0.25
+MARKETING_PENALTY = 0.4
+INVALID_URL_PENALTY = 0.25
+DEFAULT_RELEVANCE = 0.5
+AUTHORITY_MIN_RELEVANCE = 0.45
+MIN_RELEVANCE = 0.3
+
+
+def host_of(url: str) -> str:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def _matches(host: str, domains: tuple[str, ...]) -> bool:
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
+def is_blocked(url: str) -> bool:
+    host = host_of(url)
+    try:
+        port = urlparse(url).port
+    except ValueError:
+        return True
+    return (
+        _matches(host, BLOCKED_DOMAINS)
+        or _matches(host, LOW_TRUST_DOMAINS)
+        or host.rsplit(".", 1)[-1] in FREE_TLDS
+        or bool(IP_ADDRESS.match(host))
+        or port not in STANDARD_PORTS
+    )
+
+
+def quality_bonus(url: str) -> float:
+    host = host_of(url)
+    if not host:
+        return -INVALID_URL_PENALTY
+    labels = host.split(".")
+    path = urlparse(url).path.lower()
+    if (
+        AUTHORITY_LABELS & set(labels)
+        or _matches(host, AUTHORITY_DOMAINS)
+        or labels[0] in DOCS_SUBDOMAINS
+        or path.startswith(DOCS_PATHS)
+    ):
+        return AUTHORITY_BONUS
+    return 0.0
+
+
+def _relevance(result: dict) -> float:
+    try:
+        return float(result.get("score"))
+    except (TypeError, ValueError):
+        return DEFAULT_RELEVANCE
+
+
+def _marketing_penalty(result: dict) -> float:
+    path = urlparse(str(result["url"])).path.lower()
+    if path.startswith(MARKETING_PATHS) or MARKETING_TITLE.search(str(result.get("title") or "")):
+        return MARKETING_PENALTY
+    return 0.0
+
+
+def _value(result: dict) -> float:
+    relevance = _relevance(result)
+    bonus = quality_bonus(str(result["url"]))
+    if bonus > 0 and relevance < AUTHORITY_MIN_RELEVANCE:
+        bonus = 0.0
+    return relevance + bonus - _marketing_penalty(result)
+
+
+def rank_results(results: list[dict], limit: int, per_host: int = 2) -> list[dict]:
+    candidates = [r for r in results if r.get("url") and r.get("content") and not is_blocked(str(r["url"]))]
+    relevant = [r for r in candidates if _relevance(r) >= MIN_RELEVANCE]
+    ranked = sorted(relevant or candidates, key=_value, reverse=True)
+
+    chosen: list[dict] = []
+    per_site: dict[str, int] = {}
+    for result in ranked:
+        host = host_of(str(result["url"]))
+        if per_site.get(host, 0) >= per_host:
+            continue
+        per_site[host] = per_site.get(host, 0) + 1
+        chosen.append(result)
+        if len(chosen) == limit:
+            return chosen
+
+    for result in ranked:
+        if len(chosen) == limit:
+            break
+        if result not in chosen:
+            chosen.append(result)
+    return chosen
+
+
+def _letters(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _is_site_tail(tail: str, host_labels: list[str]) -> bool:
+    words = {word.strip(",.").lower() for word in tail.split()}
+    return (
+        tail.strip().lower() in GENERIC_TITLE_TAILS
+        or bool(words & TAGLINE_WORDS)
+        or any(label in _letters(tail) for label in host_labels)
+    )
+
+
+def _slug_words(url: str) -> list[str]:
+    slug = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+    words = [word for word in re.split(r"[-_]+", re.sub(r"\.(?:html?|php|aspx?)$", "", slug)) if word]
+    while words and re.fullmatch(r"[0-9a-f]{8,}", words[-1]):
+        words.pop()
+    return words
+
+
+def _complete_truncated(title: str, url: str) -> str:
+    if not title.endswith(("...", "…")):
+        return title
+    prefix = title.rstrip(".… ").rstrip()
+    words = _slug_words(url)
+    wanted = _letters(prefix)
+    spelled = ""
+    for count, word in enumerate(words, 1):
+        spelled += _letters(word)
+        if spelled == wanted:
+            rest = [w.upper() if w.lower() in TITLE_ACRONYMS else w.capitalize() for w in words[count:]]
+            return " ".join([prefix, *rest]) if rest else prefix
+        if len(spelled) > len(wanted):
+            break
+    return title
+
+
+def clean_title(title: str, url: str) -> str:
+    cleaned = " ".join(title.split())
+    unprefixed = re.sub(r"^GitHub\s*[-–—:]\s*", "", cleaned)
+    if len(unprefixed) >= MIN_TITLE_LENGTH:
+        cleaned = unprefixed
+    if " | " in cleaned:
+        head = cleaned.split(" | ")[0].strip()
+        if len(head) >= MIN_TITLE_LENGTH:
+            cleaned = head
+
+    host_labels = [label for label in host_of(url).split(".")[:-1] if len(label) >= 4]
+    stripped = True
+    while stripped:
+        stripped = False
+        for dash in TITLE_DASHES:
+            head, found, tail = cleaned.rpartition(dash)
+            if found and len(head.strip()) >= MIN_TITLE_LENGTH and _is_site_tail(tail, host_labels):
+                cleaned = head.strip()
+                stripped = True
+                break
+    return _complete_truncated(cleaned, url)
