@@ -1,5 +1,6 @@
-"""Search tools. Every tool returns a list of SourceDoc dicts and never raises:
-a failing source must not take the whole interview down."""
+"""Search tools. Every tool returns a list of SourceDoc dicts and never raises: a failing source must not
+take the whole interview down. The one exception is Tavily saying its credits are used up
+(`SearchCreditsExhausted`), because then every later search fails too and the user has to be told."""
 
 import logging
 import os
@@ -33,6 +34,13 @@ WIKIPEDIA_MIN_INTERVAL = 0.25 if _user_email else 0.75
 REQUEST_TIMEOUT = 15
 TAVILY_CANDIDATE_FACTOR = 2
 TAVILY_MAX_CANDIDATES = 20
+
+
+class SearchCreditsExhausted(Exception):
+    """Tavily refused a search because the plan's credits are used up (its 432 and 433 answers)."""
+
+
+_CREDITS_EXHAUSTED = re.compile(r"\bError (?:432|433)\b")
 
 
 class WikipediaRateLimited(Exception):
@@ -149,7 +157,9 @@ def tavily_search(query: str, search_depth: str = "basic", max_results: int = 3)
     limit = max(1, min(int(max_results), 10))
     try:
         data = _get_tavily(depth, min(limit * TAVILY_CANDIDATE_FACTOR, TAVILY_MAX_CANDIDATES)).invoke({"query": query})
-    except Exception:
+    except Exception as exc:
+        if _CREDITS_EXHAUSTED.search(str(exc)):
+            raise SearchCreditsExhausted(str(exc)) from exc
         logger.warning("Tavily search failed for query %r", query, exc_info=True)
         return []
 

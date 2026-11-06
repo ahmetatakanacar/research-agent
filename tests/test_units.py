@@ -84,6 +84,23 @@ def test_tavily_search_maps_results_normalizes_options_and_survives_errors(monke
     assert tools.tavily_search("q") == []
 
 
+def test_tavily_search_reports_used_up_credits_but_not_other_failures(monkeypatch):
+    def failing(message):
+        class Broken:
+            def invoke(self, payload):
+                raise ValueError(message)
+
+        monkeypatch.setattr(tools, "_get_tavily", lambda depth, n: Broken())
+
+    for message in ("Error 432: This request exceeds your plan's set usage limit.", "Error 433: pay-as-you-go limit"):
+        failing(message)
+        with pytest.raises(tools.SearchCreditsExhausted):
+            tools.tavily_search("q")
+    for message in ("Error 429: Too many requests", "Error 500: boom", "Error 4320: nothing to do with credits"):
+        failing(message)
+        assert tools.tavily_search("q") == []
+
+
 def test_tavily_search_over_fetches_and_keeps_the_best_sources(monkeypatch):
     seen = []
 
