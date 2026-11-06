@@ -37,7 +37,9 @@ class ClaimVerdict(BaseModel):
         description="Word-for-word passage copied from one of the cited sources that backs or contradicts the "
                     "sentence. Empty only if no cited source says anything relevant or the sentence says the "
                     "sources lack something.")
-    reasoning: str = Field(default="", description="One or two sentences comparing the quote with the sentence.")
+    reasoning: str = Field(
+        default="", description="Clause by clause: whether a cited source states each part of the sentence as "
+                                "written, including figures, direction words and negations.")
     states_absence: bool = Field(
         default=False, description="True when the sentence itself says the sources do not contain or confirm something.")
     verdict: Literal["supported", "partial", "unsupported", "contradicted", "not_a_claim", "unknown"]
@@ -58,7 +60,7 @@ CLAIM_INSTRUCTIONS = """You are a strict but fair fact-checker. Below are senten
 Judge every sentence using ONLY the cited sources, never outside knowledge. The goal is to catch facts, figures and statements that the sources do not back, not to demand that the sources use the report's exact words.
 For each sentence, work in this order:
 1. quote: copy, word for word, the passage from one cited source that best backs or contradicts the sentence. Leave it empty only when no cited source says anything relevant, or when the sentence says that the sources lack something.
-2. reasoning: one or two sentences comparing the quote with the sentence.
+2. reasoning: go through the sentence clause by clause. For each clause, including every figure, date, name, direction word (higher or lower, increase or decrease, more or fewer) and negation (not, cannot, no, never), say whether a cited source states it as written. A sentence may draw on several cited sources, so the quote you copy only has to cover its best-backed part. The verdict follows the weakest clause: one clause that a source contradicts makes the whole sentence contradicted, however well the rest matches.
 3. states_absence: true only when the sentence itself says the sources do not contain or confirm something.
 4. verdict:
 - supported: the cited sources state it or clearly imply it. A reasonable paraphrase counts. A recommendation or inference counts when the cited sources give the facts it rests on, even if no source states the exact advice. A sentence saying that the sources do not contain or establish something counts when the cited sources really lack it.
