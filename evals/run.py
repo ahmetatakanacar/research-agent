@@ -27,7 +27,8 @@ from langgraph.types import Command
 
 from evals import judge, metrics
 from src.agent import builder
-from src.settings import get_settings
+from src.runner import out_of_credit
+from src.settings import INTERVIEW_TURNS, SEARCH_DEPTH, get_settings
 from src.usage import UsageTracker
 
 HERE = Path(__file__).resolve().parent
@@ -36,9 +37,32 @@ RESULTS_DIR = HERE / "results"
 SMOKE = ("rag-en", "fictional-en", "false-premise-en")
 TOKENS_PER_ANALYST = 40_000  # measured on a full run: ~105k per English case and ~125k per Türkçe case, judge included
 JUDGE_TOKENS_PER_CASE = 25_000
+TAVILY_CREDITS_PER_QUERY = {"basic": 1, "advanced": 2}
 SCORED_KEYS = ("metrics", "checks", "numbers", "claims", "rubric", "coverage", "judge_usage")
 MEAN_KEYS = ("words", "subheadings", "sources", "authority_share", "max_host_share", "marketing_sources")
 SAME_MODEL = "app default (the model that writes the reports)"
+
+
+class OutOfCredit(Exception):
+    """A case could not finish properly because a service it pays for ran dry."""
+
+
+def tavily_credits(case: dict, analysts: int) -> int:
+    """The most one try of a case can use: every analyst searches once in each turn, and a report that is not in
+    English searches a second time in English. It is less when an interview ends early."""
+    queries = 1 if case["language"] == "en" else 2
+    return analysts * INTERVIEW_TURNS * queries * TAVILY_CREDITS_PER_QUERY.get(SEARCH_DEPTH, 2)
+
+
+def stop_reason(exc: BaseException) -> str | None:
+    """Why a run should stop at once instead of going on to the next case, or None for an ordinary failure."""
+    if isinstance(exc, OutOfCredit):
+        return str(exc)
+    if out_of_credit(exc):
+        return "the OpenAI account has no credit left"
+    if judge.fatal(exc):
+        return "the OpenAI key was rejected"
+    return None
 
 
 def load_cases(ids: list[str] | None = None) -> list[dict]:
@@ -100,6 +124,9 @@ def run_case(case: dict, analysts: int = 2, judge_llm=None, max_claims: int = 24
     graph.invoke({"topic": case["topic"], "max_analyst": analysts, "language": case["language"]}, config)
     final = graph.invoke(Command(resume=""), config)
     elapsed = time.monotonic() - started
+    if any(w.get("code") == "search_credits_exhausted" for w in final.get("warnings") or []):
+        # The report was written from Wikipedia alone for part of the interviews: scoring it would blame the agent.
+        raise OutOfCredit("the Tavily search credits ran out during this case, so its sources are incomplete")
 
     sources = final["final_sources"]
     by_url = {source["url"]: source for source in final.get("sources") or []}
@@ -303,6 +330,7 @@ def main(argv=None) -> int:
 
     ids = args.cases.split(",") if args.cases else (list(SMOKE) if args.smoke else None)
     judging = not args.no_judge
+    credits = 0
     if args.rescore:
         saved = load_saved(args.rescore, ids)
         names = [s["id"] for s in saved]
@@ -315,11 +343,12 @@ def main(argv=None) -> int:
         names = [case["id"] if t == 1 else f"{case['id']}#{t}" for case in cases for t in range(1, trials + 1)]
         per_case = args.analysts * TOKENS_PER_ANALYST + (JUDGE_TOKENS_PER_CASE if judging else 0)
         estimate = len(names) * per_case
+        credits = trials * sum(tavily_credits(case, args.analysts) for case in cases)
         print(f"{len(cases)} case(s) x {trials} trial(s), {args.analysts} analyst(s) each, "
               f"judge {'on' if judging else 'off'}: {', '.join(case['id'] for case in cases)}")
         needs_yes, needs_keys = True, ("OPENAI_API_KEY", "TAVILY_API_KEY")
     if needs_yes:
-        print(f"Rough cost: ~{estimate:,} tokens" + ("" if args.rescore else " plus Tavily searches") + ".")
+        print(f"Rough cost: ~{estimate:,} tokens" + (f" plus up to {credits} Tavily credits" if credits else "") + ".")
         if not args.yes:
             print("Nothing was run. Add --yes to start.")
             return 0
@@ -345,10 +374,18 @@ def main(argv=None) -> int:
     out_dir = RESULTS_DIR / (datetime.now().strftime("%Y%m%d-%H%M%S") + (f"-{suffix}" if suffix else ""))
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    stopped: list[str] = []  # why the run had to stop; the first reason is kept
+
     def safe(case_id: str):
+        if stopped:
+            return {"id": case_id, "error": f"not started: {stopped[0]}"}
         try:
             return jobs[case_id]()
         except Exception as exc:
+            reason = stop_reason(exc)
+            if reason:
+                stopped.append(reason)
+                return {"id": case_id, "error": f"stopped: {reason}"}
             return {"id": case_id, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
     results: dict[str, dict] = {}
@@ -378,6 +415,8 @@ def main(argv=None) -> int:
     tries = consistency(rows)
     if tries:
         summary["consistency"] = tries
+    if stopped:
+        summary["stopped"] = stopped[0]
     (out_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print()
@@ -407,6 +446,12 @@ def main(argv=None) -> int:
             lines = compare(aggregate([old["cases"][i] for i in shared]), aggregate([rows[i] for i in shared]))
             print("\n".join(lines) if lines else "  no difference")
     print(f"\nSaved to {out_dir}")
+    if stopped:
+        unfinished = [r["id"].split("#")[0] for r in ordered if str(r.get("error", "")).startswith(("stopped", "not started"))]
+        rerun = ("--rescore " + args.rescore + " --cases ") if args.rescore else "--cases "
+        print(f"\nStopped early: {stopped[0]}. Every number above covers only the cases that finished. "
+              f"Fix that, then run the rest with: python -m evals.run {rerun}{','.join(dict.fromkeys(unfinished))} --yes")
+        return 1
     return 0
 
 

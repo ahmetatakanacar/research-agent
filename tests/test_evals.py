@@ -525,6 +525,70 @@ def test_without_yes_nothing_is_run(capsys, monkeypatch):
     assert f"{6 * (2 * run.TOKENS_PER_ANALYST + run.JUDGE_TOKENS_PER_CASE):,}" in printed
 
 
+def test_the_plan_counts_the_most_tavily_credits_a_run_can_use(capsys):
+    english = {"language": "en"}
+    turkish = {"language": "tr"}
+    per_query = run.TAVILY_CREDITS_PER_QUERY[run.SEARCH_DEPTH]
+    assert run.tavily_credits(english, 2) == 2 * run.INTERVIEW_TURNS * per_query
+    assert run.tavily_credits(turkish, 2) == 2 * run.tavily_credits(english, 2)
+
+    cases = run.load_cases(list(run.SMOKE))
+    assert run.main(["--smoke", "--trials", "2"]) == 0
+    expected = 2 * sum(run.tavily_credits(case, 2) for case in cases)
+    assert f"plus up to {expected} Tavily credits" in capsys.readouterr().out
+
+
+def test_a_try_whose_web_search_ran_dry_is_not_scored(llm, monkeypatch):
+    from src.utils.tools import SearchCreditsExhausted
+
+    def dry(query, *args, **kwargs):
+        raise SearchCreditsExhausted("Error 432: usage limit")
+
+    monkeypatch.setattr("src.utils.nodes.tavily_search", dry)
+    with pytest.raises(run.OutOfCredit, match="Tavily"):
+        run.run_case({"id": "demo", "category": "technical", "language": "en", "topic": "A fake topic"}, analysts=1)
+    assert run.stop_reason(run.OutOfCredit("the Tavily search credits ran out")) == "the Tavily search credits ran out"
+    assert run.stop_reason(OUT_OF_CREDIT) == "the OpenAI account has no credit left"
+    assert run.stop_reason(AuthenticationError("bad key")) == "the OpenAI key was rejected"
+    assert run.stop_reason(RuntimeError("boom")) is None and run.stop_reason(RateLimitError("slow down")) is None
+
+
+def test_a_run_stops_when_the_account_runs_dry_and_says_how_to_finish(tmp_path, monkeypatch, capsys):
+    started = []
+
+    def run_case(case, *args, **kwargs):
+        started.append(case["id"])
+        if len(started) == 2:
+            raise OUT_OF_CREDIT
+        return _finished(case["id"])
+
+    monkeypatch.setattr(run, "run_case", run_case)
+    monkeypatch.setattr(run, "make_judge", lambda model: None)
+    monkeypatch.setattr(run, "RESULTS_DIR", tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "set-for-the-test")
+    monkeypatch.setenv("TAVILY_API_KEY", "set-for-the-test")
+
+    assert run.main(["--cases", "rag-en,fictional-en,false-premise-en", "--yes", "--no-judge", "--parallel", "1"]) == 1
+    printed = capsys.readouterr().out
+    assert started == ["rag-en", "fictional-en"]  # the third was never started
+    assert "Stopped early: the OpenAI account has no credit left" in printed
+    assert "--cases fictional-en,false-premise-en --yes" in printed and "set-for-the-test" not in printed
+    summary = json.loads(next(tmp_path.glob("*/summary.json")).read_text(encoding="utf-8"))
+    assert summary["stopped"] == "the OpenAI account has no credit left"
+    assert summary["cases"]["rag-en"].get("error") is None
+    assert summary["cases"]["fictional-en"]["error"].startswith("stopped")
+    assert summary["cases"]["false-premise-en"]["error"].startswith("not started")
+
+
+def _finished(case_id):
+    report = "# T\n\n## Introduction\n\nA [1].\n\n---\n\nB [1].\n\n---\n\nC [1].\n\n## Sources\n\n1. [a](https://a.example)\n"
+    saved = {"id": case_id, "case_id": case_id, "trial": 1, "topic": "t", "language": "en", "category": "technical",
+             "analysts": 1, "usage": {"total_tokens": 1, "elapsed": 1.0}, "report": report,
+             "sources": [{"n": 1, "url": "https://a.example", "title": "a", "kind": "web"}], "source_texts": {},
+             "warnings": [], "review_notes": []}
+    return run.score(saved, {}, {}, None, 24)
+
+
 def test_a_case_runs_end_to_end_and_is_scored(llm):
     case = {"id": "demo", "category": "fictional", "language": "en", "topic": "A fake topic",
             "criteria": ["The report must say the topic is unconfirmed."], "key_points": ["A point about the topic."]}
