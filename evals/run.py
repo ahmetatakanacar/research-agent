@@ -34,7 +34,7 @@ HERE = Path(__file__).resolve().parent
 CASES_FILE = HERE / "cases.json"
 RESULTS_DIR = HERE / "results"
 SMOKE = ("rag-en", "fictional-en", "false-premise-en")
-TOKENS_PER_ANALYST = 35_000
+TOKENS_PER_ANALYST = 40_000  # measured on a full run: ~105k per English case and ~125k per Türkçe case, judge included
 JUDGE_TOKENS_PER_CASE = 25_000
 SCORED_KEYS = ("metrics", "checks", "numbers", "claims", "rubric", "coverage", "judge_usage")
 MEAN_KEYS = ("words", "subheadings", "sources", "authority_share", "max_host_share", "marketing_sources")
@@ -74,7 +74,7 @@ def score(result: dict, texts: dict[int, dict], case: dict, judge_llm, max_claim
     measured = metrics.evaluate_report(scored["report"], scored["sources"], scored.get("language"))
     scored.update(metrics=measured, checks=metrics.run_checks(measured))
     if texts:
-        scored["numbers"] = metrics.number_grounding(scored["report"], texts)
+        scored["numbers"] = metrics.number_grounding(scored["report"], texts, scored.get("topic", ""))
     if judge_llm is not None and texts:
         judge_tracker = UsageTracker()
         claims = judge.extract_claims(scored["report"], max_claims)
@@ -155,6 +155,7 @@ def aggregate(rows: list[dict]) -> dict:
     figures = sum(n["numbers"] for n in numbers)
     agg["number_grounding"] = round(1 - sum(n["ungrounded"] for n in numbers) / figures, 3) if figures else None
     agg["ungrounded_numbers"] = sum(n["ungrounded"] for n in numbers) if numbers else None
+    agg["misplaced_numbers"] = sum(n.get("misplaced", 0) for n in numbers) if numbers else None
 
     judged = [row["claims"] for row in ok if row.get("claims")]
     counted = sum(c["judged"] for c in judged)
