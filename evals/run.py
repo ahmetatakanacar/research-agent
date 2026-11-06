@@ -3,6 +3,7 @@
     python -m evals.run --smoke --yes                       # 3 English cases
     python -m evals.run --yes --label before-change         # every case
     python -m evals.run --yes --baseline evals/results/<earlier-run>
+    python -m evals.run --yes --trials 3 --cases rag-en     # three isolated tries: pass@3 and pass^3
     python -m evals.run --rescore evals/results/<run> --yes # score saved reports again, no agent run
 
 A run calls the real models and search, so it costs money. Without --yes it only prints the plan.
@@ -34,9 +35,10 @@ CASES_FILE = HERE / "cases.json"
 RESULTS_DIR = HERE / "results"
 SMOKE = ("rag-en", "fictional-en", "false-premise-en")
 TOKENS_PER_ANALYST = 35_000
-JUDGE_TOKENS_PER_CASE = 12_000
-SCORED_KEYS = ("metrics", "checks", "claims", "rubric", "judge_usage")
+JUDGE_TOKENS_PER_CASE = 25_000
+SCORED_KEYS = ("metrics", "checks", "numbers", "claims", "rubric", "coverage", "judge_usage")
 MEAN_KEYS = ("words", "subheadings", "sources", "authority_share", "max_host_share", "marketing_sources")
+SAME_MODEL = "app default (the model that writes the reports)"
 
 
 def load_cases(ids: list[str] | None = None) -> list[dict]:
@@ -69,19 +71,24 @@ def make_judge(model: str | None):
 def score(result: dict, texts: dict[int, dict], case: dict, judge_llm, max_claims: int) -> dict:
     """Add the checks and, when a judge is given, the model-graded results to a saved run."""
     scored = {key: value for key, value in result.items() if key not in SCORED_KEYS}
-    measured = metrics.evaluate_report(scored["report"], scored["sources"])
+    measured = metrics.evaluate_report(scored["report"], scored["sources"], scored.get("language"))
     scored.update(metrics=measured, checks=metrics.run_checks(measured))
+    if texts:
+        scored["numbers"] = metrics.number_grounding(scored["report"], texts)
     if judge_llm is not None and texts:
         judge_tracker = UsageTracker()
         claims = judge.extract_claims(scored["report"], max_claims)
         scored["claims"] = judge.judge_claims(judge_llm, claims, texts, [judge_tracker])
-        if case.get("rubric"):
-            scored["rubric"] = judge.judge_rubric(judge_llm, scored["report"], case["rubric"], [judge_tracker])
+        if case.get("criteria"):
+            scored["rubric"] = judge.judge_criteria(judge_llm, scored["report"], case["criteria"], [judge_tracker])
+        if case.get("key_points"):
+            scored["coverage"] = judge.judge_coverage(judge_llm, scored["report"], case["key_points"], [judge_tracker])
         scored["judge_usage"] = judge_tracker.snapshot()
     return scored
 
 
-def run_case(case: dict, analysts: int = 2, judge_llm=None, max_claims: int = 24) -> dict:
+def run_case(case: dict, analysts: int = 2, judge_llm=None, max_claims: int = 24, trial: int = 1) -> dict:
+    """One isolated try: its own graph, checkpoint store, thread and usage counter, so tries cannot share state."""
     graph = make_graph()
     tracker = UsageTracker()
     config = {
@@ -104,7 +111,8 @@ def run_case(case: dict, analysts: int = 2, judge_llm=None, max_claims: int = 24
         for source in sources
     }
     saved = {
-        "id": case["id"], "topic": case["topic"], "language": case["language"], "category": case["category"],
+        "id": case["id"] if trial == 1 else f"{case['id']}#{trial}", "case_id": case["id"], "trial": trial,
+        "topic": case["topic"], "language": case["language"], "category": case["category"],
         "analysts": analysts, "usage": tracker.snapshot(elapsed), "report": final["final_report"],
         "sources": [{key: source.get(key) for key in ("n", "url", "title", "kind")} for source in sources],
         "source_texts": texts, "warnings": final.get("warnings") or [],
@@ -114,7 +122,8 @@ def run_case(case: dict, analysts: int = 2, judge_llm=None, max_claims: int = 24
 
 
 def rescore(saved: dict, judge_llm, max_claims: int = 24) -> dict:
-    case = next((c for c in load_cases() if c["id"] == saved["id"]), {})
+    case_id = saved.get("case_id", saved["id"])
+    case = next((c for c in load_cases() if c["id"] == case_id), {})
     texts = {int(n): text for n, text in (saved.get("source_texts") or {}).items()}
     return score(saved, texts, case, judge_llm, max_claims)
 
@@ -124,11 +133,13 @@ def slim(result: dict) -> dict:
     if "error" in result:
         return {"error": result["error"]}
     row = {"metrics": result["metrics"], "checks": result["checks"], "usage": result["usage"]}
-    if "claims" in result:
-        row["claims"] = {k: v for k, v in result["claims"].items() if k != "rows"}
-    for key in ("rubric", "judge_usage"):
+    for key in ("numbers", "claims", "coverage"):
         if key in result:
-            row[key] = result[key]
+            row[key] = {k: v for k, v in result[key].items() if k != "rows"}
+    if "rubric" in result:
+        row["rubric"] = {"passed": result["rubric"]["passed"], "reason": result["rubric"]["reason"]}
+    if "judge_usage" in result:
+        row["judge_usage"] = result["judge_usage"]
     return row
 
 
@@ -140,18 +151,72 @@ def aggregate(rows: list[dict]) -> dict:
     checks = [passed for row in ok for passed in row["checks"].values()]
     agg["hard_checks_passed"] = round(sum(checks) / len(checks), 3) if checks else None
 
+    numbers = [row["numbers"] for row in ok if row.get("numbers")]
+    figures = sum(n["numbers"] for n in numbers)
+    agg["number_grounding"] = round(1 - sum(n["ungrounded"] for n in numbers) / figures, 3) if figures else None
+    agg["ungrounded_numbers"] = sum(n["ungrounded"] for n in numbers) if numbers else None
+
     judged = [row["claims"] for row in ok if row.get("claims")]
     counted = sum(c["judged"] for c in judged)
     score_sum = sum(c["supported"] + 0.5 * c["partial"] for c in judged)
     agg["faithfulness"] = round(score_sum / counted, 3) if counted else None
-    agg["unsupported_claims"] = sum(c["unsupported"] for c in judged) if judged else None
-    agg["contradicted_claims"] = sum(c["contradicted"] for c in judged) if judged else None
+    for name in ("unsupported", "contradicted", "unverified"):
+        agg[f"{name}_claims"] = sum(c.get(name, 0) for c in judged) if judged else None
+
+    covered = [row["coverage"] for row in ok if row.get("coverage")]
+    points = sum(c["judged"] for c in covered)
+    agg["coverage"] = round(sum(c["covered"] for c in covered) / points, 3) if points else None
 
     graded = [row["rubric"]["passed"] for row in ok if row.get("rubric") and row["rubric"]["passed"] is not None]
     agg["honesty_pass_rate"] = round(sum(graded) / len(graded), 3) if graded else None
     agg["tokens"] = sum(row["usage"]["total_tokens"] + row.get("judge_usage", {}).get("total_tokens", 0) for row in ok)
     agg["seconds_mean"] = round(statistics.fmean(row["usage"]["elapsed"] for row in ok), 1) if ok else None
     return agg
+
+
+def check_rates(rows: list[dict]) -> dict[str, float]:
+    """Share of cases that pass each hard check."""
+    ok = [row for row in rows if "error" not in row]
+    names = ok[0]["checks"] if ok else {}
+    return {name: round(sum(1 for row in ok if row["checks"].get(name)) / len(ok), 3) for name in names}
+
+
+def check_notes(rows: list[dict]) -> list[str]:
+    """What the per-check pass rates say about the checks themselves. A check that fails everywhere is more
+    likely broken, or a systemic defect, than ten separate bad reports; one that never fails gives no signal
+    beyond guarding against regressions."""
+    ok = [row for row in rows if "error" not in row]
+    if len(ok) < 2:
+        return []
+    rates = check_rates(rows)
+    everywhere = [name for name, rate in rates.items() if rate == 0]
+    never = [name for name, rate in rates.items() if rate == 1]
+    notes = []
+    if everywhere:
+        notes.append(f"fail in every case (a broken check or a systemic defect, read those reports): {', '.join(everywhere)}")
+    notes.append(f"{len(never)} of {len(rates)} checks pass in every case (they only guard against regressions)")
+    return notes
+
+
+def passed_case(row: dict) -> bool:
+    """A try passes when every hard check holds and no honesty criterion failed."""
+    return "error" not in row and all(row["checks"].values()) and (row.get("rubric") or {}).get("passed") is not False
+
+
+def consistency(rows: dict[str, dict]) -> dict | None:
+    """pass@k and pass^k over the tries of each case: at least one try passes, and every try passes."""
+    groups: dict[str, list[bool]] = {}
+    for case_id, row in rows.items():
+        groups.setdefault(case_id.split("#")[0], []).append(passed_case(row))
+    tries = max(len(results) for results in groups.values())
+    if tries < 2:
+        return None
+    return {
+        "tries": tries,
+        "pass_at_k": round(sum(any(r) for r in groups.values()) / len(groups), 3),
+        "pass_hat_k": round(sum(all(r) for r in groups.values()) / len(groups), 3),
+        "per_case": {case_id: f"{sum(r)}/{len(r)}" for case_id, r in groups.items()},
+    }
 
 
 def compare(old: dict, new: dict) -> list[str]:
@@ -184,8 +249,8 @@ def load_saved(folder: str, ids: list[str] | None) -> list[dict]:
 
 
 def print_table(results: list[dict]) -> None:
-    print(f"{'case':26s} {'words':>5s} {'srcs':>4s} {'auth':>5s} {'host':>5s} {'checks':>7s} "
-          f"{'faith':>6s} {'unsup':>5s} {'honest':>6s} {'tokens':>8s} {'sec':>4s}")
+    print(f"{'case':26s} {'words':>5s} {'srcs':>4s} {'auth':>5s} {'host':>5s} {'checks':>7s} {'nums':>5s} "
+          f"{'faith':>6s} {'unsup':>5s} {'cover':>5s} {'honest':>6s} {'tokens':>8s} {'sec':>4s}")
     for result in results:
         if "error" in result:
             print(f"{result['id']:26s} ERROR  {result['error']}")
@@ -194,16 +259,21 @@ def print_table(results: list[dict]) -> None:
         rubric = (result.get("rubric") or {}).get("passed")
         honest = "-" if rubric is None else ("pass" if rubric else "FAIL")
         faith = "-" if c.get("faithfulness") is None else f"{c['faithfulness']:.2f}"
+        nums = (result.get("numbers") or {}).get("grounding")
+        cover = (result.get("coverage") or {}).get("coverage")
         tokens = result["usage"]["total_tokens"] + result.get("judge_usage", {}).get("total_tokens", 0)
         passed = sum(result["checks"].values())
+        bad = c.get("unsupported", 0) + c.get("unverified", 0) if c else "-"
         print(f"{result['id']:26s} {m['words']:5d} {m['sources']:4d} {m['authority_share']:5.0%} "
-              f"{m['max_host_share']:5.0%} {passed:>3d}/{len(result['checks']):<3d} {faith:>6s} "
-              f"{c.get('unsupported', '-')!s:>5s} {honest:>6s} {tokens:8,d} {result['usage']['elapsed']:4.0f}")
+              f"{m['max_host_share']:5.0%} {passed:>3d}/{len(result['checks']):<3d} "
+              f"{'-' if nums is None else format(nums, '.0%'):>5s} {faith:>6s} {bad!s:>5s} "
+              f"{'-' if cover is None else format(cover, '.0%'):>5s} {honest:>6s} {tokens:8,d} "
+              f"{result['usage']['elapsed']:4.0f}")
         failed = [name for name, ok in result["checks"].items() if not ok]
         if failed:
             print(f"    failed checks: {', '.join(failed)}")
         if rubric is False:
-            print(f"    rubric: {result['rubric']['reason']}")
+            print(f"    criteria: {result['rubric']['reason']}")
 
 
 def parse_args(argv):
@@ -212,6 +282,7 @@ def parse_args(argv):
     parser.add_argument("--smoke", action="store_true", help=f"only {', '.join(SMOKE)}")
     parser.add_argument("--rescore", metavar="FOLDER", help="score the reports saved in an earlier run again")
     parser.add_argument("--analysts", type=int, default=2, help="analysts per research (default 2)")
+    parser.add_argument("--trials", type=int, default=1, help="isolated tries per case, for pass@k and pass^k (default 1)")
     parser.add_argument("--parallel", type=int, default=3, help="researches at once (default 3)")
     parser.add_argument("--no-judge", action="store_true", help="skip the model-graded checks (cheaper)")
     parser.add_argument("--judge-model", help="model for the judge (default: the app's main model)")
@@ -239,11 +310,12 @@ def main(argv=None) -> int:
         needs_yes, needs_keys = judging, ("OPENAI_API_KEY",) if judging else ()
     else:
         cases = load_cases(ids)
-        names = [case["id"] for case in cases]
+        trials = max(1, args.trials)
+        names = [case["id"] if t == 1 else f"{case['id']}#{t}" for case in cases for t in range(1, trials + 1)]
         per_case = args.analysts * TOKENS_PER_ANALYST + (JUDGE_TOKENS_PER_CASE if judging else 0)
-        estimate = len(cases) * per_case
-        print(f"{len(cases)} case(s), {args.analysts} analyst(s) each, judge {'on' if judging else 'off'}: "
-              f"{', '.join(names)}")
+        estimate = len(names) * per_case
+        print(f"{len(cases)} case(s) x {trials} trial(s), {args.analysts} analyst(s) each, "
+              f"judge {'on' if judging else 'off'}: {', '.join(case['id'] for case in cases)}")
         needs_yes, needs_keys = True, ("OPENAI_API_KEY", "TAVILY_API_KEY")
     if needs_yes:
         print(f"Rough cost: ~{estimate:,} tokens" + ("" if args.rescore else " plus Tavily searches") + ".")
@@ -258,7 +330,13 @@ def main(argv=None) -> int:
     if args.rescore:
         jobs = {s["id"]: (lambda s=s: rescore(s, judge_llm, args.max_claims)) for s in saved}
     else:
-        jobs = {c["id"]: (lambda c=c: run_case(c, args.analysts, judge_llm, args.max_claims)) for c in cases}
+        jobs = {
+            (c["id"] if t == 1 else f"{c['id']}#{t}"):
+                (lambda c=c, t=t: run_case(c, args.analysts, judge_llm, args.max_claims, trial=t))
+            for c in cases for t in range(1, trials + 1)
+        }
+    if judging:
+        print(f"Judge: {args.judge_model or SAME_MODEL}, version {judge.VERSION}.")
 
     label = re.sub(r"[^\w.-]", "-", args.label).strip("-")
     prefix = "rescore" if args.rescore else ""
@@ -291,8 +369,14 @@ def main(argv=None) -> int:
     summary = {
         "label": args.label, "created": datetime.now().isoformat(timespec="seconds"),
         "analysts": first.get("analysts", args.analysts), "judge": judging,
+        "judge_model": (args.judge_model or SAME_MODEL) if judging else None,
+        "judge_version": judge.VERSION if judging else None,
         "cases": rows, "aggregate": aggregate(list(rows.values())),
+        "check_pass_rates": check_rates(list(rows.values())),
     }
+    tries = consistency(rows)
+    if tries:
+        summary["consistency"] = tries
     (out_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print()
@@ -300,6 +384,13 @@ def main(argv=None) -> int:
     print("\nAggregate:")
     for key, value in summary["aggregate"].items():
         print(f"  {key:22s} {value}")
+    for note in check_notes(list(rows.values())):
+        print(f"  note: {note}")
+    if tries:
+        print(f"\n{tries['tries']} tries per case: pass@{tries['tries']} {tries['pass_at_k']:.0%}, "
+              f"pass^{tries['tries']} {tries['pass_hat_k']:.0%} "
+              f"(a try passes when every hard check holds and no honesty criterion fails)")
+        print("  " + ", ".join(f"{case_id} {score}" for case_id, score in tries["per_case"].items()))
 
     if args.baseline:
         old = load_baseline(args.baseline)
@@ -307,6 +398,10 @@ def main(argv=None) -> int:
         if not shared:
             print("\nNo shared cases with the baseline, nothing to compare.")
         else:
+            if judging and old.get("judge") and old.get("judge_version") != judge.VERSION:
+                print(f"\nWarning: the baseline was graded by judge version {old.get('judge_version') or 'unknown'}, "
+                      f"this run by {judge.VERSION}. Faithfulness, coverage and honesty are not comparable; "
+                      f"re-score the baseline with --rescore to compare them.")
             print(f"\nChange vs baseline '{old.get('label') or args.baseline}' on {len(shared)} shared case(s):")
             lines = compare(aggregate([old["cases"][i] for i in shared]), aggregate([rows[i] for i in shared]))
             print("\n".join(lines) if lines else "  no difference")
