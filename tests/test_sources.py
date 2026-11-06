@@ -98,6 +98,17 @@ def test_merge_sections_ignores_uncited_sources():
     assert sources == []
 
 
+def test_misplaced_citations_are_those_tidy_citations_would_move():
+    from src.utils.sources import count_misplaced_citations
+
+    assert count_misplaced_citations("It rose. [1] Then it fell! [2][3] Done [4].") == 2
+    # a citation that starts the next sentence and is followed by a comma is left alone, like tidy_citations does
+    assert count_misplaced_citations("The indicators alone explain nothing. [8], pointing to a gap, adds a risk.") == 0
+    assert count_misplaced_citations("Several kinds, etc. [3] are listed.") == 0
+    for text in ("It rose. [1] Then it fell! [2][3] Done [4].", "A claim. [1], then more. [2] Last one."):
+        assert count_misplaced_citations(tidy_citations(text)) == 0
+
+
 def test_finalize_citations_renumbers_by_reading_order_and_prunes():
     sources = [{"n": 1, "url": "https://a", "title": "A"}, {"n": 2, "url": "https://b", "title": "B"},
                {"n": 3, "url": "https://c", "title": "C"}]

@@ -124,12 +124,23 @@ _ADJACENT_GROUPS = re.compile(r"\[\d{1,3}\](?:[ \t]*\[\d{1,3}\])+")
 _ABBREVIATIONS = frozenset({"e.g", "i.e", "etc", "vs", "cf", "al", "approx", "no", "fig"})
 
 
+def _movable(word: str) -> bool:
+    """False for a word that ends in a full stop of its own or is an abbreviation ("etc. [3]")."""
+    return not (word.endswith(".") or word.lower().rstrip(".") in _ABBREVIATIONS)
+
+
+def count_misplaced_citations(text: str) -> int:
+    """Citations that sit after a sentence-ending mark and that `tidy_citations` would move before it. A citation
+    that starts the next sentence and is followed by a comma ("... explains it. [8], pointing to ...") is not one."""
+    return sum(1 for match in _AFTER_SENTENCE_END.finditer(text) if _movable(match.group(1)))
+
+
 def tidy_citations(
     text: str, cap: int | None = None, priority: Callable[[int], float] | None = None
 ) -> str:
     def move_before_punctuation(match: re.Match) -> str:
         word, mark, cites = match.groups()
-        if word.endswith(".") or word.lower().rstrip(".") in _ABBREVIATIONS:
+        if not _movable(word):
             return match.group(0)
         return f"{word} {cites}{mark}"
 
