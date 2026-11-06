@@ -147,6 +147,18 @@ def test_figures_in_cited_sentences_must_appear_in_the_cited_sources():
     assert metrics.number_grounding("## Insights\n\nNothing numeric here at all [1].", texts)["grounding"] is None
 
 
+def test_a_figure_from_the_question_is_not_a_claim_and_a_misplaced_citation_is_told_from_an_invented_figure():
+    report = ("## Insights\n\nNo source confirms that the protocol was developed in 1987 at all [1]. "
+              "The law passed in 2012 became the main legal framework [1]. "
+              "The programme reached 9,300 households last year [1].\n\n## Sources\n\n1. x\n")
+    texts = {1: {"content": "Nothing relevant is said here."}, 2: {"content": "The law passed in 2012 in the end."}}
+    result = metrics.number_grounding(report, texts, topic="The development of the protocol in 1987")
+    assert result["numbers"] == 2  # 1987 comes from the question and is left out
+    by_number = {row["number"]: row for row in result["rows"]}
+    assert by_number["2012"]["elsewhere"] == [2] and by_number["9,300"]["elsewhere"] == []
+    assert result["ungrounded"] == 2 and result["misplaced"] == 1
+
+
 def test_claims_are_cited_sentences_without_the_markers():
     report = (
         "# T\n\n## Introduction\n\nChunk size changes which passages are retrieved [1][2]. Short [1]. "
@@ -242,6 +254,16 @@ def test_a_quote_is_matched_ignoring_case_punctuation_and_spacing():
     assert not judge.quote_found("retrieval", pool)  # too short to count as evidence
     assert not judge.quote_found("", pool)
     assert not judge.quote_found(SOURCE_QUOTE, ["Some other source entirely."])
+
+
+def test_a_long_quote_stitched_from_several_passages_counts_but_a_paraphrase_does_not():
+    source = ("alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau "
+              "upsilon phi chi psi omega")
+    stitched = "alpha beta gamma delta epsilon zeta eta theta pi rho sigma tau upsilon phi"  # two passages, no ellipsis
+    assert judge.quote_found(stitched, [source])
+    assert not judge.quote_found("omega psi chi phi upsilon tau sigma rho pi omicron xi nu mu lambda", [source])
+    # the same words in a different order are a summary, not a quote
+    assert not judge.quote_found("theta zeta alpha eta beta gamma epsilon delta kappa iota lambda mu", [source])
 
 
 def test_a_favourable_verdict_without_a_real_quote_is_not_accepted():
