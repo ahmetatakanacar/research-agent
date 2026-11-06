@@ -3,16 +3,32 @@
 import re
 from collections import Counter
 
+from evals.claims import extract_claims, sentences
 from src.utils import ranking
 from src.utils.sources import CITE_RE, cited_numbers, strip_sources_section
 
 MAX_GROUP_SIZE = 3
 MAX_TITLE_LENGTH = ranking.MAX_TITLE_LENGTH + 1
+MAX_WRONG_LANGUAGE = 0.05
 
 _RULE = re.compile(r"\n[ \t]*-{3,}[ \t]*\n")
 _GROUP = re.compile(r"(?:\[\d{1,3}\])+")
 _ADJACENT = re.compile(r"\][ \t]+\[\d")
 _AFTER_PUNCTUATION = re.compile(r"[.!?][ \t]*\[\d{1,3}\]")
+_NUMBER = re.compile(r"(\d[\d.,]*\d|\d)(\s?%)?")
+_GROUPED = re.compile(r"\d{1,3}(?:[.,]\d{3})+")
+_WORD = re.compile(r"[^\W\d_]+")
+
+# Words that mark a language and are not words in the other one. Used only to spot sentences that
+# are clearly in the wrong language (for example an English quotation inside a Türkçe report).
+STOPWORDS = {
+    "en": frozenset(
+        "the of and that with which from this are was were been have has their they these than into also such "
+        "will would could while between because although however".split()),
+    "tr": frozenset(
+        "ve bir bu için ile olarak daha gibi olan ancak veya çok kadar sonra ise değil ki şu bunun bunlar "
+        "olduğu ayrıca göre hem fakat çünkü üzerinde arasında yani".split()),
+}
 
 
 def _norm(text: str) -> str:
@@ -21,6 +37,68 @@ def _norm(text: str) -> str:
 
 def _site(host: str) -> str:
     return ".".join(host.split(".")[-2:])
+
+
+def number_forms(raw: str) -> set[str]:
+    """The ways a number may be written in another text: as is, with a decimal comma read as a point, and,
+    when it looks like thousands grouping (1,234 or 1.234), without the separators."""
+    raw = raw.strip(".,")
+    forms = {raw, raw.replace(",", ".")}
+    if _GROUPED.fullmatch(raw):
+        forms.add(re.sub(r"[.,]", "", raw))
+    return forms
+
+
+def significant_numbers(text: str) -> list[str]:
+    """Numbers worth checking: bare integers up to 10 are left out (counts such as "two studies"), unless
+    they are percentages."""
+    found = []
+    for match in _NUMBER.finditer(text):
+        raw, percent = match.group(1).strip(".,"), match.group(2)
+        if not raw or (not percent and raw.isdigit() and int(raw) <= 10):
+            continue
+        found.append(raw)
+    return found
+
+
+def all_number_forms(text: str) -> set[str]:
+    forms: set[str] = set()
+    for match in _NUMBER.finditer(text):
+        forms |= number_forms(match.group(1))
+    return forms
+
+
+def number_grounding(report: str, texts: dict[int, dict]) -> dict:
+    """Every figure in a cited sentence should appear in at least one source that sentence cites. This is a
+    free, code-only check of the figures. A figure the report derives itself (a sum, a difference) is
+    listed too, so read the rows before treating one as invented."""
+    cache = {n: all_number_forms(str(text.get("content") or "")) for n, text in texts.items()}
+    rows, total = [], 0
+    for claim in extract_claims(report, max_claims=10_000):
+        available = set().union(*(cache.get(n, set()) for n in claim["cites"]))
+        for raw in significant_numbers(claim["text"]):
+            total += 1
+            if not number_forms(raw) & available:
+                rows.append({"number": raw, "claim": claim["text"][:200], "cites": claim["cites"]})
+    return {
+        "numbers": total, "ungrounded": len(rows),
+        "grounding": round(1 - len(rows) / total, 3) if total else None, "rows": rows,
+    }
+
+
+def language_mix(report: str, language: str | None) -> dict:
+    """Sentences that are clearly written in the other one of English and Türkçe than the report's language."""
+    own = STOPWORDS.get(language or "")
+    other = STOPWORDS["tr" if language == "en" else "en"]
+    body = [s for s in sentences(strip_sources_section(report)) if len(s.split()) >= 4]
+    wrong = []
+    if own:
+        for sentence in body:
+            words = _WORD.findall(CITE_RE.sub("", sentence).lower())
+            own_hits, other_hits = sum(w in own for w in words), sum(w in other for w in words)
+            if other_hits >= 3 and other_hits >= 2 * own_hits:
+                wrong.append(sentence[:160])
+    return {"sentences": len(body), "wrong": len(wrong), "examples": wrong[:5]}
 
 
 def split_report(report: str) -> tuple[str, str, str, bool]:
@@ -33,9 +111,10 @@ def split_report(report: str) -> tuple[str, str, str, bool]:
     return main, main, main, False
 
 
-def evaluate_report(report: str, sources: list[dict]) -> dict:
+def evaluate_report(report: str, sources: list[dict], language: str | None = None) -> dict:
     introduction, body, conclusion, structured = split_report(report)
     main = strip_sources_section(report)
+    mix = language_mix(report, language)
 
     numbers = {source["n"] for source in sources}
     cited = cited_numbers(main)
@@ -78,6 +157,8 @@ def evaluate_report(report: str, sources: list[dict]) -> dict:
         "max_host_share": share(max(Counter(hosts).values())) if hosts else 0.0,
         "cut_off_titles": sum(1 for title in titles if title.rstrip().endswith(("…", "..."))),
         "long_titles": sum(1 for title in titles if len(title) > MAX_TITLE_LENGTH),
+        "wrong_language_sentences": mix["wrong"],
+        "wrong_language_share": round(mix["wrong"] / mix["sentences"], 3) if mix["sentences"] else 0.0,
     }
 
 
@@ -95,6 +176,7 @@ HARD_CHECKS = {
     "no_duplicate_sources": lambda m: m["duplicate_urls"] == 0 and m["duplicate_titles"] == 0,
     "no_blocked_sources": lambda m: m["blocked_sources"] == 0,
     "titles_complete": lambda m: m["cut_off_titles"] == 0 and m["long_titles"] == 0,
+    "language_consistent": lambda m: m["wrong_language_share"] <= MAX_WRONG_LANGUAGE,
 }
 
 
