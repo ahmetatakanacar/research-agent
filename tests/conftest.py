@@ -1,7 +1,13 @@
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# The tests must never send traces to a real LangSmith account (a key in .env would otherwise be picked up
+# when the app is imported). Set before anything imports `src`: load_dotenv does not overwrite these.
+for _name in ("LANGSMITH_TRACING", "LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2"):
+    os.environ[_name] = "false"
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
