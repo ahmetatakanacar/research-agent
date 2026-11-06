@@ -68,20 +68,30 @@ def all_number_forms(text: str) -> set[str]:
     return forms
 
 
-def number_grounding(report: str, texts: dict[int, dict]) -> dict:
+def number_grounding(report: str, texts: dict[int, dict], topic: str = "") -> dict:
     """Every figure in a cited sentence should appear in at least one source that sentence cites. This is a
-    free, code-only check of the figures. A figure the report derives itself (a sum, a difference) is
-    listed too, so read the rows before treating one as invented."""
+    free, code-only check of the figures. A figure the user's own question contains is left out: a report
+    that says "no source confirms 1987" is quoting the question, not a source. A figure the report derives
+    itself (a sum, a difference) is listed too, so read the rows before treating one as invented.
+
+    An ungrounded figure that another source of the report does contain (`elsewhere`) points to a citation on
+    the wrong source; one that no source contains comes from the model itself."""
     cache = {n: all_number_forms(str(text.get("content") or "")) for n, text in texts.items()}
+    asked = all_number_forms(topic)
     rows, total = [], 0
     for claim in extract_claims(report, max_claims=10_000):
         available = set().union(*(cache.get(n, set()) for n in claim["cites"]))
         for raw in significant_numbers(claim["text"]):
+            forms = number_forms(raw)
+            if forms & asked:
+                continue
             total += 1
-            if not number_forms(raw) & available:
-                rows.append({"number": raw, "claim": claim["text"][:200], "cites": claim["cites"]})
+            if not forms & available:
+                elsewhere = sorted(n for n, known in cache.items() if forms & known)
+                rows.append({"number": raw, "claim": claim["text"][:200], "cites": claim["cites"],
+                             "elsewhere": elsewhere})
     return {
-        "numbers": total, "ungrounded": len(rows),
+        "numbers": total, "ungrounded": len(rows), "misplaced": sum(1 for row in rows if row["elsewhere"]),
         "grounding": round(1 - len(rows) / total, 3) if total else None, "rows": rows,
     }
 
