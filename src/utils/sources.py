@@ -2,6 +2,7 @@ import re
 from typing import Callable, Iterable
 
 from src.utils.objects import SourceDoc
+from src.utils.ranking import page_key
 
 MAX_DOC_CHARS = 4000
 
@@ -14,20 +15,18 @@ _SOURCES_HEADING_RE = re.compile(
 
 
 def unique_documents(context: Iterable | None) -> list[SourceDoc]:
+    """One document per page: the same URL, or two URLs of one page (see `ranking.page_key`), keeps the first."""
     seen: dict[str, SourceDoc] = {}
     for item in context or []:
         if not isinstance(item, dict):
             continue
         url = str(item.get("url") or "").strip()
         content = str(item.get("content") or "").strip()
-        if not url or not content or url in seen:
+        title = str(item.get("title") or "").strip() or url
+        key = page_key(url, title)
+        if not url or not content or key in seen:
             continue
-        seen[url] = {
-            "url": url,
-            "title": str(item.get("title") or "").strip() or url,
-            "content": content,
-            "kind": str(item.get("kind") or "web"),
-        }
+        seen[key] = {"url": url, "title": title, "content": content, "kind": str(item.get("kind") or "web")}
     return list(seen.values())
 
 
@@ -78,10 +77,11 @@ def merge_sections(sections: list) -> tuple[list[str], list[dict]]:
             if not 1 <= k <= len(local):
                 return None
             doc = local[k - 1]
-            number = registry.get(doc["url"])
+            key = page_key(doc["url"], doc.get("title") or "")
+            number = registry.get(key)
             if number is None:
                 number = len(sources) + 1
-                registry[doc["url"]] = number
+                registry[key] = number
                 sources.append({
                     "n": number,
                     "url": doc["url"],

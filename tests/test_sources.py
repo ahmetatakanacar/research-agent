@@ -25,6 +25,20 @@ def test_unique_documents_dedupes_by_url_and_skips_junk():
     assert docs[0]["content"] == "text"
 
 
+def test_unique_documents_merges_two_urls_of_one_page_but_not_two_pages_with_a_generic_title():
+    title = "RFC 7168: The Hyper Text Coffee Pot Control Protocol for Tea Efficiently Brewing"
+    docs = unique_documents([
+        doc("https://datatracker.ietf.org/doc/html/rfc7168", title, "first text"),
+        doc("https://datatracker.ietf.org/doc/rfc7168", title, "another part of the same page"),
+        doc("https://docs.example.com/a/overview", "Overview"),
+        doc("https://docs.example.com/b/overview", "Overview"),
+    ])
+    assert [d["url"] for d in docs] == [
+        "https://datatracker.ietf.org/doc/html/rfc7168", "https://docs.example.com/a/overview",
+        "https://docs.example.com/b/overview"]
+    assert docs[0]["content"] == "first text"
+
+
 def test_format_numbered_numbers_from_one():
     out = format_numbered([doc("https://a", "A"), doc("https://b", "B")])
     assert out.startswith("[1] A — https://a")
@@ -58,6 +72,19 @@ def test_merge_sections_numbers_globally_by_first_citation():
     assert [s["url"] for s in sources] == ["https://two", "https://one", "https://three"]
     assert merged[0] == "A [1] then [2]."
     assert merged[1] == "B [1] and [3]."
+
+
+def test_merge_sections_gives_two_urls_of_one_page_one_number():
+    title = "Albert Einstein - University of Zurich"
+    sections = [
+        {"text": "A [1].", "sources": [doc("https://www.uzh.ch/cmsssl/de/about/nobelprize/einstein.html", title)]},
+        {"text": "B [1] and [2].", "sources": [doc("https://www.uzh.ch/de/excellence/nobelprize/einstein.html", title),
+                                               doc("https://three.example/x", "Three")]},
+    ]
+    merged, sources = merge_sections(sections)
+    assert [s["url"] for s in sources] == ["https://www.uzh.ch/cmsssl/de/about/nobelprize/einstein.html",
+                                           "https://three.example/x"]
+    assert merged == ["A [1].", "B [1] and [2]."]
 
 
 def test_merge_sections_drops_citations_to_missing_sources():
