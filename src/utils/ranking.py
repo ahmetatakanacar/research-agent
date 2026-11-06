@@ -13,8 +13,11 @@ AUTHORITY_DOMAINS = (
     "ieee.org", "acm.org", "jstor.org", "oecd.org", "worldbank.org", "un.org", "imf.org",
     "europa.eu", "w3.org", "ietf.org", "iso.org", "readthedocs.io", "britannica.com",
     "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk",
+    "bis.org", "nobelprize.org", "unesco.org", "bankofengland.co.uk", "cambridge.org",
+    "royalsocietypublishing.org", "acs.org", "dergipark.org.tr", "d-nb.info",
 )
 AUTHORITY_LABELS = frozenset({"gov", "edu", "ac", "mil", "int"})
+UNIVERSITY_LABEL = "universit"  # a host label that starts like this (universitaet, universidad...) or ends in "university"
 DOCS_SUBDOMAINS = frozenset({"docs", "developer", "developers", "documentation", "learn"})
 DOCS_PATHS = ("/docs", "/documentation")
 
@@ -120,6 +123,7 @@ def quality_bonus(url: str) -> float:
     path = urlparse(url).path.lower()
     if (
         AUTHORITY_LABELS & set(labels)
+        or any(label.startswith(UNIVERSITY_LABEL) or label.endswith("university") for label in labels[:-1])
         or _matches(host, AUTHORITY_DOMAINS)
         or labels[0] in DOCS_SUBDOMAINS
         or path.startswith(DOCS_PATHS)

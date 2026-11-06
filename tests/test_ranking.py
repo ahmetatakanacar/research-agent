@@ -31,6 +31,24 @@ def test_official_academic_and_government_sources_get_a_bonus():
         assert quality_bonus(url) > 0, url
 
 
+def test_institutions_and_publishers_seen_in_real_reports_get_the_bonus_but_essay_sites_do_not():
+    for url in (
+        "https://www.bis.org/publ/work1.htm",
+        "https://www.nobelprize.org/prizes/physics/1921/summary",
+        "https://ich.unesco.org/en/RL/ebru-turkish-art-of-marbling-01009",
+        "https://www.bankofengland.co.uk/working-paper/2024",
+        "https://www.cambridge.org/core/journals/x",
+        "https://royalsocietypublishing.org/doi/10.1098/rsta.1",
+        "https://pubs.acs.org/doi/10.1021/x",
+        "https://dergipark.org.tr/tr/pub/x",
+        "https://www.lunduniversity.lu.se/article/x",
+        "https://www.universitaet-wien.example/x",
+    ):
+        assert quality_bonus(url) > 0, url
+    for url in ("https://bestuniversityessays.com/buy", "https://en.wikipedia.org/wiki/Ebru", "https://example.com/universit"):
+        assert quality_bonus(url) == 0, url
+
+
 def test_blog_platforms_are_not_penalized_and_ordinary_sites_are_neutral():
     for url in ("https://medium.com/@someone/post", "https://team.medium.com/post", "https://x.substack.com/p/a",
                 "https://example.com/post"):
