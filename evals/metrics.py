@@ -5,7 +5,7 @@ from collections import Counter
 
 from evals.claims import extract_claims, sentences
 from src.utils import ranking
-from src.utils.sources import CITE_RE, cited_numbers, strip_sources_section
+from src.utils.sources import CITE_RE, cited_numbers, count_misplaced_citations, strip_sources_section
 
 MAX_GROUP_SIZE = 3
 MAX_TITLE_LENGTH = ranking.MAX_TITLE_LENGTH + 1
@@ -14,7 +14,6 @@ MAX_WRONG_LANGUAGE = 0.05
 _RULE = re.compile(r"\n[ \t]*-{3,}[ \t]*\n")
 _GROUP = re.compile(r"(?:\[\d{1,3}\])+")
 _ADJACENT = re.compile(r"\][ \t]+\[\d")
-_AFTER_PUNCTUATION = re.compile(r"[.!?][ \t]*\[\d{1,3}\]")
 _NUMBER = re.compile(r"(\d[\d.,]*\d|\d)(\s?%)?")
 _GROUPED = re.compile(r"\d{1,3}(?:[.,]\d{3})+")
 _WORD = re.compile(r"[^\W\d_]+")
@@ -155,7 +154,7 @@ def evaluate_report(report: str, sources: list[dict], language: str | None = Non
         "oversized_groups": sum(1 for g in group_numbers if len(g) > MAX_GROUP_SIZE),
         "unsorted_groups": sum(1 for g in group_numbers if g != sorted(g)),
         "adjacent_groups": len(_ADJACENT.findall(main)),
-        "citations_after_punctuation": len(_AFTER_PUNCTUATION.findall(main)),
+        "citations_after_punctuation": count_misplaced_citations(main),
         "introduction_cited": bool(CITE_RE.search(introduction)),
         "body_cited": bool(CITE_RE.search(body)),
         "conclusion_cited": bool(CITE_RE.search(conclusion)),
