@@ -37,7 +37,7 @@ from src.utils.sources import (
     unique_documents,
 )
 from src.utils.states import GenerateAnalystState, InterviewState, ResearchGraphState
-from src.utils.tools import tavily_search, wikipedia_search
+from src.utils.tools import SearchCreditsExhausted, tavily_search, wikipedia_search
 
 load_dotenv()
 
@@ -199,7 +199,15 @@ def search_web(state: InterviewState):
     if _language(state) != "en" and english and english.lower() != query.lower():
         queries.append(english)
 
-    found = [tavily_search(q, SEARCH_DEPTH, SEARCH_CANDIDATES) for q in queries]
+    try:
+        found = [tavily_search(q, SEARCH_DEPTH, SEARCH_CANDIDATES) for q in queries]
+    except SearchCreditsExhausted:
+        # The interview goes on with Wikipedia alone, and the report says so (once per analyst).
+        analyst = _analyst(state["analyst"]).name
+        logger.warning("Tavily credits are used up: %s's interview continues with Wikipedia only", analyst)
+        told = any(w.get("code") == "search_credits_exhausted" and w.get("analyst") == analyst
+                   for w in state.get("warnings") or [])
+        return {"context": [], "warnings": [] if told else [{"code": "search_credits_exhausted", "analyst": analyst}]}
     candidates: list = []
     seen: set[str] = set()
     for doc in (doc for group in zip_longest(*found) for doc in group if doc):

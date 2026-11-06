@@ -166,6 +166,24 @@ def test_no_sources_gives_honest_placeholder_and_warning(llm, monkeypatch):
     assert "[1]" not in final["final_report"]
 
 
+def test_used_up_tavily_credits_warn_once_per_analyst_and_the_report_still_gets_written(llm, monkeypatch):
+    from src.utils.tools import SearchCreditsExhausted
+
+    def web(query, *args, **kwargs):
+        raise SearchCreditsExhausted("Error 432: usage limit")
+
+    monkeypatch.setattr("src.utils.nodes.tavily_search", web)
+    graph = make_graph()
+    config, _ = start(graph)
+    final = approve(graph, config)
+
+    codes = [(w["code"], w["analyst"]) for w in final["warnings"]]
+    assert sorted(codes) == [("search_credits_exhausted", "Analyst 1"), ("search_credits_exhausted", "Analyst 2")]
+    assert llm.calls.count("answer") == 4  # Wikipedia still gave the experts something to work from
+    assert {doc["kind"] for section in final["sections"] for doc in section["sources"]} == {"wikipedia"}
+    assert "## Sources" in final["final_report"]
+
+
 def test_analyst_closing_sentence_ends_the_interview_early(llm):
     llm.close_after = 1
     graph = make_graph()
