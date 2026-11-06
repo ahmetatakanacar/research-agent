@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from evals.claims import extract_claims  # noqa: F401  (re-exported for callers and tests)
+from src.runner import out_of_credit
 from src.utils.sources import strip_sources_section
 
 SOURCE_CHARS = 2500
@@ -28,6 +29,13 @@ GRAM = 4
 MIN_QUOTE_COVERAGE = 0.6
 
 UNFAVOURABLE = ("unsupported", "contradicted", "unverified")
+
+
+def fatal(exc: BaseException) -> bool:
+    """A failure that every later call repeats: the account has no credit left or the key is rejected. The judge
+    lets it through instead of counting it as one unjudged claim, so a run stops rather than scoring on a
+    fraction of the claims."""
+    return out_of_credit(exc) or any(cls.__name__ == "AuthenticationError" for cls in type(exc).__mro__)
 
 
 class ClaimVerdict(BaseModel):
@@ -183,7 +191,9 @@ def judge_claims(llm, claims: list[dict], texts: dict[int, dict], callbacks: lis
     for start in range(0, len(claims), BATCH_SIZE):
         try:
             judged.update(_ask(checker, config, claims[start:start + BATCH_SIZE], texts))
-        except Exception:
+        except Exception as exc:
+            if fatal(exc):
+                raise
             errors += 1
 
     rows = [_row(claim, judged.get(claim["id"]), texts) for claim in claims]
@@ -192,7 +202,9 @@ def judge_claims(llm, claims: list[dict], texts: dict[int, dict], callbacks: lis
             continue
         try:
             again = _ask(checker, config, [claim], texts).get(claim["id"])
-        except Exception:
+        except Exception as exc:
+            if fatal(exc):
+                raise
             errors += 1
             continue
         if again:
@@ -218,6 +230,8 @@ def _grade(llm, report: str, requirement: str, callbacks: list | None, need_quot
             config={"callbacks": callbacks or []},
         )
     except Exception as exc:
+        if fatal(exc):
+            raise
         row["reason"] = f"judge failed: {type(exc).__name__}"
         return row
     verdict = result.verdict

@@ -201,7 +201,7 @@ class ScriptedJudge:
             prompt = messages[0].content
             self.prompts.append(prompt)
             if self.fail:
-                raise RuntimeError("scripted judge failure")
+                raise self.fail if isinstance(self.fail, BaseException) else RuntimeError("scripted judge failure")
             if schema is judge.ClaimVerdicts:
                 texts = dict(re.findall(r"^\[c(\d+)\] (.*?) \(cites", prompt, re.M))
                 return judge.ClaimVerdicts(verdicts=[
@@ -244,6 +244,34 @@ def test_claims_are_judged_in_batches_and_scored():
     assert "retrieval and chunking" in scripted.prompts[0]
     row = result["rows"][0]
     assert row["quote"] == SOURCE_QUOTE and row["quote_found"] and row["verdict"] == "supported"
+
+
+class RateLimitError(Exception):
+    """Looks, by name and text, like what the openai package raises."""
+
+
+class AuthenticationError(Exception): ...
+
+
+OUT_OF_CREDIT = RateLimitError("Error code: 429 - {'error': {'type': 'insufficient_quota'}}")
+
+
+def test_the_judge_counts_an_ordinary_failure_but_lets_a_dry_account_or_a_bad_key_through():
+    ordinary = judge.judge_claims(ScriptedJudge(fail=True), _claims(3), TEXTS)
+    assert ordinary["errors"] == 1 and ordinary["judged"] == 0 and ordinary["faithfulness"] is None
+    assert judge.judge_criteria(ScriptedJudge(fail=True), "report", ["a criterion"])["passed"] is None
+    # a rate limit that is only a rate limit is an ordinary failure too
+    assert judge.judge_claims(ScriptedJudge(fail=RateLimitError("slow down")), _claims(3), TEXTS)["errors"] == 1
+
+    for failure in (OUT_OF_CREDIT, AuthenticationError("bad key")):
+        assert judge.fatal(failure)
+        with pytest.raises(type(failure)):
+            judge.judge_claims(ScriptedJudge(fail=failure), _claims(3), TEXTS)
+        with pytest.raises(type(failure)):
+            judge.judge_criteria(ScriptedJudge(fail=failure), "report", ["a criterion"])
+        with pytest.raises(type(failure)):
+            judge.judge_coverage(ScriptedJudge(fail=failure), "report", ["a point"])
+    assert not judge.fatal(RuntimeError("scripted judge failure"))
 
 
 def test_a_quote_is_matched_ignoring_case_punctuation_and_spacing():
