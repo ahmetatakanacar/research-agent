@@ -677,10 +677,16 @@ function renderReportMeta() {
   $("#report-meta").textContent = [meta, usageText(state.usage)].filter(Boolean).join(" · ");
 }
 
+const WARNING_TEXT = {
+  no_sources: "warn_no_sources",
+  review_failed: "warn_review_failed",
+  search_credits_exhausted: "warn_search_credits",
+};
+
 function renderReportNotes() {
   const warnings = $("#report-warnings");
   warnings.replaceChildren(...state.warnings.map((warning) => {
-    const key = warning.code === "no_sources" ? "warn_no_sources" : warning.code === "review_failed" ? "warn_review_failed" : null;
+    const key = WARNING_TEXT[warning.code];
     return el("li", "", key ? t(key, { analyst: warning.analyst || "" }) : String(warning.code));
   }));
   warnings.hidden = state.warnings.length === 0;

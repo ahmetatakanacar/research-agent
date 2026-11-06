@@ -80,6 +80,7 @@ const en = {
   review_fixed: "corrected", review_unfixed: "could not be corrected",
   warn_no_sources: "No sources were found for {analyst}’s focus area, so that part of the report is empty.",
   warn_review_failed: "The fact-check could not be completed, so the report has not been reviewed.",
+  warn_search_credits: "The Tavily search credits ran out during {analyst}’s interview, so that part relies on Wikipedia only.",
   report_meta: "{topic} · {analysts} · ~{words} words · {minutes} min read · {date}",
 
   history_title: "Past research",
@@ -185,6 +186,7 @@ const tr = {
   review_fixed: "düzeltildi", review_unfixed: "düzeltilemedi",
   warn_no_sources: "{analyst} için odak alanında kaynak bulunamadı, bu yüzden raporun o bölümü boş.",
   warn_review_failed: "Doğrulama tamamlanamadı, bu yüzden rapor denetlenmedi.",
+  warn_search_credits: "{analyst} için yapılan röportajda Tavily arama kredisi bitti, bu yüzden o bölüm yalnızca Wikipedia’ya dayanıyor.",
   report_meta: "{topic} · {analysts} · ~{words} kelime · {minutes} dk okuma · {date}",
 
   history_title: "Geçmiş araştırmalar",
