@@ -5,9 +5,9 @@
     "language": "en",
     "topic": "How does retrieval-augmented generation work, and where does it fail?",
     "key_points": [
-      "RAG retrieves relevant documents or passages when a question is asked and gives them to the language model as context for its answer.",
-      "RAG can fail when retrieval returns irrelevant or incomplete passages, or when the model ignores or misuses the retrieved context.",
-      "RAG gives a model access to information outside its training data, such as recent or private documents."
+      "RAG retrieves relevant documents or passages when a question is asked and gives them to the language model as context.",
+      "RAG can fail when retrieval returns irrelevant or incomplete passages.",
+      "RAG lets a model use information outside its training data."
     ]
   },
   {
@@ -16,9 +16,9 @@
     "language": "tr",
     "topic": "Vektör veritabanları nasıl çalışır ve geleneksel veritabanları yerine ne zaman tercih edilmelidir?",
     "key_points": [
-      "Vector databases store data as numerical embedding vectors and find items by similarity (nearest-neighbour search) rather than by exact match.",
-      "Approximate nearest neighbour (ANN) indexing is used to make similarity search fast at large scale.",
-      "Traditional relational databases remain the better choice for exact-match queries, transactions and structured data."
+      "Vector databases find items by the similarity of embedding vectors rather than by exact match.",
+      "Approximate nearest neighbour (ANN) indexing makes similarity search fast at large scale.",
+      "Traditional relational databases remain the better choice for exact-match queries and transactions."
     ]
   },
   {
@@ -29,7 +29,7 @@
     "key_points": [
       "Intermittent fasting can lead to modest weight loss, roughly comparable to ordinary calorie restriction.",
       "The evidence on long-term effects and safety is limited.",
-      "People with certain conditions (for example pregnancy, diabetes treated with medication, or a history of eating disorders) should be careful or talk to a doctor before fasting."
+      "Some people, for example pregnant women or people with diabetes who take medication, should be careful with fasting or ask a doctor first."
     ]
   },
   {
@@ -40,7 +40,7 @@
     "key_points": [
       "Intermittent fasting can lead to modest weight loss, roughly comparable to ordinary calorie restriction.",
       "The evidence on long-term effects and safety is limited.",
-      "People with certain conditions (for example pregnancy, diabetes treated with medication, or a history of eating disorders) should be careful or talk to a doctor before fasting."
+      "Some people, for example pregnant women or people with diabetes who take medication, should be careful with fasting or ask a doctor first."
     ]
   },
   {
@@ -49,9 +49,9 @@
     "language": "tr",
     "topic": "Türkiye'de deprem riskine karşı kentsel dönüşüm politikaları ne kadar etkili oldu?",
     "key_points": [
-      "Urban transformation in Turkey is carried out mainly under Law No. 6306 on the Transformation of Areas Under Disaster Risk (2012).",
-      "The 2023 Kahramanmaraş earthquakes, with their heavy building damage, are central to judging how effective the policy has been.",
-      "Reported obstacles include financing, the consent of building owners and the slow pace of transformation."
+      "Law No. 6306 of 2012 is the main legal framework for urban transformation in Turkey.",
+      "The 2023 Kahramanmaraş earthquakes and their building damage are discussed as evidence on how well the policy worked.",
+      "Financing or the consent of building owners is named as an obstacle to urban transformation."
     ]
   },
   {
@@ -60,9 +60,9 @@
     "language": "en",
     "topic": "How do central bank interest rate decisions affect inflation and exchange rates in emerging economies?",
     "key_points": [
-      "Raising policy interest rates tends to reduce inflation by cooling demand and credit, with a delay.",
-      "Higher interest rates can attract capital inflows and support the currency.",
-      "In emerging economies these effects are limited or complicated by factors such as central bank credibility, foreign-currency debt and global financial conditions."
+      "Raising policy interest rates tends to reduce inflation by cooling demand, with a delay.",
+      "Higher interest rates can support a country's currency.",
+      "In emerging economies the effects of rate decisions can be limited or complicated by factors such as central bank credibility, foreign-currency debt or global financial conditions."
     ]
   },
   {
@@ -71,9 +71,9 @@
     "language": "tr",
     "topic": "Ebru sanatının tarihi, tekniği ve UNESCO tarafından tanınması",
     "key_points": [
-      "Ebru is the art of making patterns with paints floated on a thickened water surface and transferring them to paper.",
-      "UNESCO inscribed Turkish ebru (paper marbling) on the Representative List of the Intangible Cultural Heritage of Humanity in 2014.",
-      "Ebru has a long history in Turkish and Ottoman culture, where it was used to decorate documents and calligraphy."
+      "Ebru is the art of making patterns with paint floated on a thickened water surface and transferring them to paper.",
+      "UNESCO inscribed Turkish ebru on its Representative List of the Intangible Cultural Heritage of Humanity in 2014.",
+      "Ebru has a long history in Turkish and Ottoman culture."
     ]
   },
   {
@@ -84,7 +84,7 @@
     "key_points": [
       "AI coding assistants can speed up routine programming tasks.",
       "Code produced by AI still needs a human to review, understand and debug it.",
-      "The report gives arguments on both sides, for example worries about fewer entry-level jobs and expected demand for people who can direct and check AI tools."
+      "The report presents arguments both for and against learning to code now."
     ]
   },
   {
