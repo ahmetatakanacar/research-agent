@@ -26,19 +26,32 @@ class RunsBusy(Exception):
     pass
 
 
+def _class_names(exc: BaseException) -> set[str]:
+    # Match the whole class hierarchy: langchain-openai raises subclasses such as
+    # OpenAIAuthenticationError, whose own name is not the one the openai package uses.
+    return {cls.__name__ for cls in type(exc).__mro__}
+
+
+def out_of_credit(exc: BaseException) -> bool:
+    """The OpenAI account has no credit left. OpenAI reports this as a rate-limit error (429), but waiting
+    does not help: the account has to be topped up."""
+    return "RateLimitError" in _class_names(exc) and (
+        getattr(exc, "code", None) == "insufficient_quota" or "insufficient_quota" in str(exc))
+
+
 def friendly_error(exc: BaseException) -> dict:
     """Map an exception to a message that is safe to show. Details stay in the server log."""
     ref = uuid.uuid4().hex[:8]
     logger.error("Run failed [%s]", ref, exc_info=exc)
 
-    # Match the whole class hierarchy: langchain-openai raises subclasses such as
-    # OpenAIAuthenticationError, whose own name is not the one the openai package uses.
-    names = {cls.__name__ for cls in type(exc).__mro__}
+    names = _class_names(exc)
     code, message = "unknown", "Something went wrong while researching."
     if "AuthenticationError" in names:
         code, message = "auth", "The OpenAI API key was rejected."
+    elif out_of_credit(exc):
+        code, message = "quota", "The OpenAI account has no credit left."
     elif "RateLimitError" in names:
-        code, message = "rate_limit", "The OpenAI API rate limit or quota was reached."
+        code, message = "rate_limit", "The OpenAI API rate limit was reached."
     elif "NotFoundError" in names:
         code, message = "model", "The configured OpenAI model was not found."
     elif names & {"APITimeoutError", "ReadTimeout", "ConnectTimeout"}:

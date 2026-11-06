@@ -416,3 +416,18 @@ def test_friendly_error_matches_subclasses_of_the_openai_errors():
     assert friendly_error(RateLimitError("quota"))["code"] == "rate_limit"
     assert friendly_error(OpenAITimeout2("slow"))["code"] == "timeout"
     assert friendly_error(ValueError("boom"))["code"] == "unknown"
+
+
+def test_friendly_error_tells_used_up_credit_from_a_rate_limit():
+    from src.runner import friendly_error, out_of_credit
+
+    class RateLimitError(Exception): ...
+
+    class OpenAIRateLimitError(RateLimitError):
+        code = "insufficient_quota"
+
+    by_text = RateLimitError("Error code: 429 - {'error': {'type': 'insufficient_quota'}}")
+    assert friendly_error(OpenAIRateLimitError("You exceeded your current quota"))["code"] == "quota"
+    assert friendly_error(by_text)["code"] == "quota"
+    assert out_of_credit(by_text) and not out_of_credit(RateLimitError("Rate limit reached for requests"))
+    assert not out_of_credit(ValueError("insufficient_quota"))
