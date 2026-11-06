@@ -245,6 +245,23 @@ def test_very_long_titles_are_shortened_at_a_word_boundary():
     assert clean_title(academic, "https://arxiv.org/html/2608.03836v1") == academic
 
 
+def test_a_long_title_is_cut_where_its_subtitle_starts_when_that_leaves_a_complete_title():
+    url = "https://pmc.ncbi.nlm.nih.gov/articles/PMC1"
+    colon = ("Intermittent fasting strategies and their effects on body weight and other cardiometabolic risk factors: "
+             "systematic review and network meta-analysis of randomised controlled trials in adults")
+    assert clean_title(colon, url) == (
+        "Intermittent fasting strategies and their effects on body weight and other cardiometabolic risk factors")
+    question = ("Is Fasting Superior to Continuous Caloric Restriction for Weight Loss and Metabolic Outcomes in Obese "
+                "Adults? A Systematic Review and Meta-Analysis of Randomized Controlled Trials in Several Countries")
+    assert clean_title(question, url) == (
+        "Is Fasting Superior to Continuous Caloric Restriction for Weight Loss and Metabolic Outcomes in Obese Adults?")
+    # a break that would leave too little, or none at all, keeps the word-boundary cut
+    early = "Overview: " + "a long description of the same subject with many words " * 4
+    assert clean_title(early, url).endswith("…") and clean_title(early, url).startswith("Overview: a long")
+    ratio = "Effect of intermittent fasting 16:8 and 14:10 compared with control group on weight reduction " * 2
+    assert clean_title(ratio, url).endswith("…")
+
+
 def test_the_review_and_report_prompts_guard_against_self_contradicting_sentences():
     from src.utils.prompts import report_writer_instructions, review_instructions
 

@@ -240,9 +240,21 @@ def _trim_cut_off(title: str) -> str:
     return " ".join(words).rstrip(",:;-–— ")
 
 
+SUBTITLE_BREAKS = (": ", " – ", " — ", " - ", "? ")
+MIN_HEAD_LENGTH = 40
+
+
 def _shorten(title: str) -> str:
+    """A title over the limit is cut where its subtitle starts when that leaves a complete title ("Intermittent
+    fasting strategies and their effects on body weight: systematic review of..." becomes the part before the
+    colon). Only when there is no such break is it cut at a word with an ellipsis."""
     if len(title) <= MAX_TITLE_LENGTH:
         return title
+    window = title[:MAX_TITLE_LENGTH + 1]
+    breaks = [(window.rfind(mark), mark) for mark in SUBTITLE_BREAKS]
+    position, mark = max(breaks, default=(-1, ""))
+    if position >= MIN_HEAD_LENGTH:
+        return title[:position + (1 if mark == "? " else 0)].rstrip(" :;,.-–—")
     head = title[:MAX_TITLE_LENGTH].rsplit(" ", 1)[0].rstrip(" :;,.-–—")
     return head + "…"
 
