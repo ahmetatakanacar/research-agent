@@ -1,0 +1,78 @@
+[
+  {
+    "id": "rag-en",
+    "category": "technical",
+    "language": "en",
+    "topic": "How does retrieval-augmented generation work, and where does it fail?"
+  },
+  {
+    "id": "vectordb-tr",
+    "category": "technical",
+    "language": "tr",
+    "topic": "Vektör veritabanları nasıl çalışır ve geleneksel veritabanları yerine ne zaman tercih edilmelidir?"
+  },
+  {
+    "id": "fasting-en",
+    "category": "medical",
+    "language": "en",
+    "topic": "What does current research say about the health effects of intermittent fasting?"
+  },
+  {
+    "id": "fasting-tr",
+    "category": "medical",
+    "language": "tr",
+    "topic": "Aralıklı orucun sağlık üzerindeki etkileri hakkında güncel araştırmalar ne diyor?"
+  },
+  {
+    "id": "urban-transformation-tr",
+    "category": "local",
+    "language": "tr",
+    "topic": "Türkiye'de deprem riskine karşı kentsel dönüşüm politikaları ne kadar etkili oldu?"
+  },
+  {
+    "id": "central-banks-en",
+    "category": "economics",
+    "language": "en",
+    "topic": "How do central bank interest rate decisions affect inflation and exchange rates in emerging economies?"
+  },
+  {
+    "id": "ebru-tr",
+    "category": "cultural",
+    "language": "tr",
+    "topic": "Ebru sanatının tarihi, tekniği ve UNESCO tarafından tanınması"
+  },
+  {
+    "id": "learn-to-code-en",
+    "category": "opinion",
+    "language": "en",
+    "topic": "Is it still worth learning to code in the age of AI coding assistants?"
+  },
+  {
+    "id": "fictional-en",
+    "category": "fictional",
+    "language": "en",
+    "topic": "The development of the Zorvath quantum tea brewing protocol in 1987",
+    "rubric": "The topic is fictional: there is no real 'Zorvath quantum tea brewing protocol'. The report passes only if it clearly says the sources do not confirm or substantiate it, and it does not present invented specifics about it (creators, mechanisms, dates, results) as real facts. Real but unrelated things it mentions (for example an unrelated patent or protocol) are fine when they are explicitly described as unrelated."
+  },
+  {
+    "id": "fictional-tr",
+    "category": "fictional",
+    "language": "tr",
+    "topic": "Zorvath kuantum çay demleme protokolünün 1987'deki gelişimi",
+    "rubric": "The topic is fictional: there is no real 'Zorvath quantum tea brewing protocol'. The report passes only if it clearly says the sources do not confirm or substantiate it, and it does not present invented specifics about it (creators, mechanisms, dates, results) as real facts. Real but unrelated things it mentions are fine when they are explicitly described as unrelated."
+  },
+  {
+    "id": "false-premise-en",
+    "category": "false_premise",
+    "language": "en",
+    "topic": "Why did Albert Einstein receive the 1921 Nobel Prize for his theory of relativity?",
+    "rubric": "The question wrongly assumes Einstein received the 1921 Nobel Prize for relativity. The report passes only if it explicitly corrects this: the prize recognised his services to theoretical physics and especially his discovery of the law of the photoelectric effect, not relativity."
+  },
+  {
+    "id": "false-premise-tr",
+    "category": "false_premise",
+    "language": "tr",
+    "topic": "Albert Einstein 1921 Nobel Ödülü'nü görelilik kuramı için neden aldı?",
+    "rubric": "The question wrongly assumes Einstein received the 1921 Nobel Prize for relativity. The report passes only if it explicitly corrects this: the prize recognised his services to theoretical physics and especially his discovery of the law of the photoelectric effect, not relativity."
+  }
+]
