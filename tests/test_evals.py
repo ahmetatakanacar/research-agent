@@ -375,6 +375,23 @@ def test_coverage_counts_a_point_only_with_a_quote_found_in_the_report():
     assert unsure["unknown"] == 1 and unsure["covered"] == 0
 
 
+def test_evals_do_not_trace_unless_asked_to(monkeypatch):
+    import importlib
+    import os
+
+    import evals
+
+    monkeypatch.delenv("EVALS_TRACE", raising=False)
+    monkeypatch.setenv("LANGSMITH_TRACING_V2", "true")
+    importlib.reload(evals)
+    assert os.environ["LANGSMITH_TRACING_V2"] == "false"
+
+    monkeypatch.setenv("EVALS_TRACE", "1")
+    monkeypatch.setenv("LANGSMITH_TRACING_V2", "true")
+    importlib.reload(evals)
+    assert os.environ["LANGSMITH_TRACING_V2"] == "true"
+
+
 def test_the_judge_version_follows_its_prompts():
     assert re.fullmatch(r"[0-9a-f]{8}", judge.VERSION)
 
