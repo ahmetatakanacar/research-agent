@@ -63,6 +63,35 @@ def host_of(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+PAGE_EXTENSIONS = (".html", ".htm", ".php", ".aspx", ".asp")
+MIN_PAGE_TITLE_WORDS = 2
+MIN_PAGE_SEGMENT = 4
+
+
+def page_key(url: str, title: str = "") -> str:
+    """The key under which two URLs of the same page meet: the same site, the same title and the same last path
+    segment (datatracker.ietf.org/doc/html/rfc7168 and /doc/rfc7168). The text a search returns for the two
+    URLs differs, so it cannot be compared. A page that does not qualify keeps its URL as its key, so a
+    one-word title such as "Overview" or a segment such as "2" never merges two different pages."""
+    host = host_of(url)
+    try:
+        path = urlparse(url).path
+    except ValueError:
+        return url
+    segment = next((part for part in reversed(path.lower().split("/")) if part), "")
+    for extension in PAGE_EXTENSIONS:
+        segment = segment.removesuffix(extension)
+    words = re.findall(r"\w+", title.lower())
+    if (
+        not host
+        or len(words) < MIN_PAGE_TITLE_WORDS
+        or len(segment) < MIN_PAGE_SEGMENT
+        or not any(char.isalpha() for char in segment)
+    ):
+        return url
+    return f"{'.'.join(host.split('.')[-2:])}|{' '.join(words)}|{segment}"
+
+
 def _matches(host: str, domains: tuple[str, ...]) -> bool:
     return any(host == domain or host.endswith("." + domain) for domain in domains)
 

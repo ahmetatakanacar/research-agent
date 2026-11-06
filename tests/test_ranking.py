@@ -1,4 +1,4 @@
-from src.utils.ranking import clean_title, host_of, is_blocked, quality_bonus, rank_results
+from src.utils.ranking import clean_title, host_of, is_blocked, page_key, quality_bonus, rank_results
 
 
 def result(url, score=0.5, content="text"):
@@ -331,3 +331,34 @@ def test_github_prefix_is_removed_from_titles():
     assert clean_title(
         "GitHub - kennethleungty/Handoffs-in-LangGraph: Clearly Explained", "https://github.com/kennethleungty/x"
     ) == "kennethleungty/Handoffs-in-LangGraph: Clearly Explained"
+
+
+def test_two_urls_of_one_page_share_a_key():
+    ietf = "RFC 7168: The Hyper Text Coffee Pot Control Protocol for Tea Efficiently Brewing"
+    assert page_key("https://datatracker.ietf.org/doc/html/rfc7168", ietf) == page_key(
+        "https://datatracker.ietf.org/doc/rfc7168", ietf)
+    uzh = "Albert Einstein - University of Zurich"
+    assert page_key("https://www.uzh.ch/cmsssl/de/about/portrait/nobelprize/einstein.html", uzh) == page_key(
+        "https://www.uzh.ch/de/researchinnovation/excellence/nobelprize/einstein.html", uzh)
+    wiki = "Hyper Text Coffee Pot Control Protocol - Wikipedia"
+    assert page_key("https://en.wikipedia.org/wiki/Hyper_Text_Coffee_Pot_Control_Protocol", wiki) == page_key(
+        "https://en.m.wikipedia.org/wiki/Hyper_Text_Coffee_Pot_Control_Protocol", wiki)
+
+
+def test_different_pages_never_share_a_key():
+    # a different title, a different last segment, or the same page name on another site
+    assert page_key("https://arxiv.org/pdf/2312.10997", "Retrieval-Augmented Generation for Large Language Models: A Survey") != page_key(
+        "https://arxiv.org/html/2609.06391v1", "Fine-grained Claim-level RAG Benchmark for Law")
+    assert page_key("https://docs.example.com/a/guide", "Setting up the service") != page_key(
+        "https://docs.example.com/a/setup", "Setting up the service")
+    assert page_key("https://example.com/news/story", "A long enough title") != page_key(
+        "https://other.org/news/story", "A long enough title")
+
+
+def test_generic_titles_and_bare_segments_are_not_merged():
+    one_word = "Overview"
+    assert page_key("https://docs.example.com/a/overview", one_word) == "https://docs.example.com/a/overview"
+    assert page_key("https://docs.example.com/b/overview", one_word) != page_key("https://docs.example.com/a/overview", one_word)
+    assert page_key("https://news.example.com/latest/page/2", "Latest posts and news") == "https://news.example.com/latest/page/2"
+    assert page_key("https://example.com/", "A long enough title") == "https://example.com/"
+    assert page_key("not a url", "A long enough title") == "not a url"
