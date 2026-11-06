@@ -24,6 +24,8 @@ from src.utils.sources import strip_sources_section
 SOURCE_CHARS = 2500
 BATCH_SIZE = 8
 MIN_QUOTE_CHARS = 15
+GRAM = 4
+MIN_QUOTE_COVERAGE = 0.6
 
 UNFAVOURABLE = ("unsupported", "contradicted", "unverified")
 
@@ -89,7 +91,7 @@ REPORT:
 """
 
 # Anything that changes how verdicts are reached, besides the prompts, goes in the protocol tag.
-PROTOCOL = "quote-check, isolated retry of unverified claims"
+PROTOCOL = "quote-check by four-word coverage, isolated retry of unverified claims"
 VERSION = hashlib.sha1(
     "|".join([CLAIM_INSTRUCTIONS, GRADE_INSTRUCTIONS, str(SOURCE_CHARS), str(BATCH_SIZE), PROTOCOL]).encode("utf-8")
 ).hexdigest()[:8]
@@ -99,14 +101,31 @@ def _fold(text: str) -> str:
     return re.sub(r"[^\w]+", " ", text.lower()).strip()
 
 
+def _grams(words: list[str]) -> set[tuple[str, ...]]:
+    return {tuple(words[i:i + GRAM]) for i in range(len(words) - GRAM + 1)}
+
+
 def quote_found(quote: str, texts: list[str]) -> bool:
-    """True when the quote is in one of the texts, ignoring case, punctuation and spacing. An ellipsis splits
-    a quote into pieces that must each be found."""
+    """True when the quote really comes from one of the texts, ignoring case, punctuation and spacing. An
+    ellipsis splits a quote into pieces, and each piece must be found.
+
+    A short piece must appear as it is. A longer one may also be stitched together from several passages
+    without an ellipsis, which the judge does with long quotes: it passes when at least MIN_QUOTE_COVERAGE of
+    its four-word runs are in the texts. Measured on a full run, real quotes cover 0.67 to 1.0 of their runs
+    and a paraphrase of the same sentence at most 0.43, so words that merely recur do not pass."""
     pieces = [piece for piece in (_fold(p) for p in re.split(r"…|\.\.\.", quote or "")) if piece]
     if sum(len(piece) for piece in pieces) < MIN_QUOTE_CHARS:
         return False
     pool = [_fold(text) for text in texts]
-    return all(any(piece in text for text in pool) for piece in pieces)
+    known = set().union(*(_grams(text.split()) for text in pool))
+
+    def found(piece: str) -> bool:
+        if any(piece in text for text in pool):
+            return True
+        grams = _grams(piece.split())
+        return bool(grams) and sum(1 for gram in grams if gram in known) / len(grams) >= MIN_QUOTE_COVERAGE
+
+    return all(found(piece) for piece in pieces)
 
 
 def _claims_block(batch: list[dict]) -> str:
