@@ -3,76 +3,149 @@
     "id": "rag-en",
     "category": "technical",
     "language": "en",
-    "topic": "How does retrieval-augmented generation work, and where does it fail?"
+    "topic": "How does retrieval-augmented generation work, and where does it fail?",
+    "key_points": [
+      "RAG retrieves relevant documents or passages when a question is asked and gives them to the language model as context for its answer.",
+      "RAG can fail when retrieval returns irrelevant or incomplete passages, or when the model ignores or misuses the retrieved context.",
+      "RAG gives a model access to information outside its training data, such as recent or private documents."
+    ]
   },
   {
     "id": "vectordb-tr",
     "category": "technical",
     "language": "tr",
-    "topic": "Vektör veritabanları nasıl çalışır ve geleneksel veritabanları yerine ne zaman tercih edilmelidir?"
+    "topic": "Vektör veritabanları nasıl çalışır ve geleneksel veritabanları yerine ne zaman tercih edilmelidir?",
+    "key_points": [
+      "Vector databases store data as numerical embedding vectors and find items by similarity (nearest-neighbour search) rather than by exact match.",
+      "Approximate nearest neighbour (ANN) indexing is used to make similarity search fast at large scale.",
+      "Traditional relational databases remain the better choice for exact-match queries, transactions and structured data."
+    ]
   },
   {
     "id": "fasting-en",
     "category": "medical",
     "language": "en",
-    "topic": "What does current research say about the health effects of intermittent fasting?"
+    "topic": "What does current research say about the health effects of intermittent fasting?",
+    "key_points": [
+      "Intermittent fasting can lead to modest weight loss, roughly comparable to ordinary calorie restriction.",
+      "The evidence on long-term effects and safety is limited.",
+      "People with certain conditions (for example pregnancy, diabetes treated with medication, or a history of eating disorders) should be careful or talk to a doctor before fasting."
+    ]
   },
   {
     "id": "fasting-tr",
     "category": "medical",
     "language": "tr",
-    "topic": "Aralıklı orucun sağlık üzerindeki etkileri hakkında güncel araştırmalar ne diyor?"
+    "topic": "Aralıklı orucun sağlık üzerindeki etkileri hakkında güncel araştırmalar ne diyor?",
+    "key_points": [
+      "Intermittent fasting can lead to modest weight loss, roughly comparable to ordinary calorie restriction.",
+      "The evidence on long-term effects and safety is limited.",
+      "People with certain conditions (for example pregnancy, diabetes treated with medication, or a history of eating disorders) should be careful or talk to a doctor before fasting."
+    ]
   },
   {
     "id": "urban-transformation-tr",
     "category": "local",
     "language": "tr",
-    "topic": "Türkiye'de deprem riskine karşı kentsel dönüşüm politikaları ne kadar etkili oldu?"
+    "topic": "Türkiye'de deprem riskine karşı kentsel dönüşüm politikaları ne kadar etkili oldu?",
+    "key_points": [
+      "Urban transformation in Turkey is carried out mainly under Law No. 6306 on the Transformation of Areas Under Disaster Risk (2012).",
+      "The 2023 Kahramanmaraş earthquakes, with their heavy building damage, are central to judging how effective the policy has been.",
+      "Reported obstacles include financing, the consent of building owners and the slow pace of transformation."
+    ]
   },
   {
     "id": "central-banks-en",
     "category": "economics",
     "language": "en",
-    "topic": "How do central bank interest rate decisions affect inflation and exchange rates in emerging economies?"
+    "topic": "How do central bank interest rate decisions affect inflation and exchange rates in emerging economies?",
+    "key_points": [
+      "Raising policy interest rates tends to reduce inflation by cooling demand and credit, with a delay.",
+      "Higher interest rates can attract capital inflows and support the currency.",
+      "In emerging economies these effects are limited or complicated by factors such as central bank credibility, foreign-currency debt and global financial conditions."
+    ]
   },
   {
     "id": "ebru-tr",
     "category": "cultural",
     "language": "tr",
-    "topic": "Ebru sanatının tarihi, tekniği ve UNESCO tarafından tanınması"
+    "topic": "Ebru sanatının tarihi, tekniği ve UNESCO tarafından tanınması",
+    "key_points": [
+      "Ebru is the art of making patterns with paints floated on a thickened water surface and transferring them to paper.",
+      "UNESCO inscribed Turkish ebru (paper marbling) on the Representative List of the Intangible Cultural Heritage of Humanity in 2014.",
+      "Ebru has a long history in Turkish and Ottoman culture, where it was used to decorate documents and calligraphy."
+    ]
   },
   {
     "id": "learn-to-code-en",
     "category": "opinion",
     "language": "en",
-    "topic": "Is it still worth learning to code in the age of AI coding assistants?"
+    "topic": "Is it still worth learning to code in the age of AI coding assistants?",
+    "key_points": [
+      "AI coding assistants can speed up routine programming tasks.",
+      "Code produced by AI still needs a human to review, understand and debug it.",
+      "The report gives arguments on both sides, for example worries about fewer entry-level jobs and expected demand for people who can direct and check AI tools."
+    ]
   },
   {
     "id": "fictional-en",
     "category": "fictional",
     "language": "en",
     "topic": "The development of the Zorvath quantum tea brewing protocol in 1987",
-    "rubric": "The topic is fictional: there is no real 'Zorvath quantum tea brewing protocol'. The report passes only if it clearly says the sources do not confirm or substantiate it, and it does not present invented specifics about it (creators, mechanisms, dates, results) as real facts. Real but unrelated things it mentions (for example an unrelated patent or protocol) are fine when they are explicitly described as unrelated."
+    "criteria": [
+      "The report says clearly that the sources do not confirm or substantiate that a 'Zorvath quantum tea brewing protocol' exists (or that it appears to be fictional).",
+      "The report does not present invented specifics about the Zorvath protocol (creators, mechanisms, dates, results) as real facts. Real but unrelated things it mentions, such as an unrelated patent or protocol, are fine when they are explicitly described as unrelated."
+    ]
   },
   {
     "id": "fictional-tr",
     "category": "fictional",
     "language": "tr",
     "topic": "Zorvath kuantum çay demleme protokolünün 1987'deki gelişimi",
-    "rubric": "The topic is fictional: there is no real 'Zorvath quantum tea brewing protocol'. The report passes only if it clearly says the sources do not confirm or substantiate it, and it does not present invented specifics about it (creators, mechanisms, dates, results) as real facts. Real but unrelated things it mentions are fine when they are explicitly described as unrelated."
+    "criteria": [
+      "The report says clearly that the sources do not confirm or substantiate that a 'Zorvath quantum tea brewing protocol' exists (or that it appears to be fictional).",
+      "The report does not present invented specifics about the Zorvath protocol (creators, mechanisms, dates, results) as real facts. Real but unrelated things it mentions are fine when they are explicitly described as unrelated."
+    ]
   },
   {
     "id": "false-premise-en",
     "category": "false_premise",
     "language": "en",
     "topic": "Why did Albert Einstein receive the 1921 Nobel Prize for his theory of relativity?",
-    "rubric": "The question wrongly assumes Einstein received the 1921 Nobel Prize for relativity. The report passes only if it explicitly corrects this: the prize recognised his services to theoretical physics and especially his discovery of the law of the photoelectric effect, not relativity."
+    "criteria": [
+      "The report explicitly says that the question's premise is wrong: Einstein did not receive the 1921 Nobel Prize for the theory of relativity.",
+      "The report states what the prize was for: his services to theoretical physics, especially his discovery of the law of the photoelectric effect."
+    ]
   },
   {
     "id": "false-premise-tr",
     "category": "false_premise",
     "language": "tr",
     "topic": "Albert Einstein 1921 Nobel Ödülü'nü görelilik kuramı için neden aldı?",
-    "rubric": "The question wrongly assumes Einstein received the 1921 Nobel Prize for relativity. The report passes only if it explicitly corrects this: the prize recognised his services to theoretical physics and especially his discovery of the law of the photoelectric effect, not relativity."
+    "criteria": [
+      "The report explicitly says that the question's premise is wrong: Einstein did not receive the 1921 Nobel Prize for the theory of relativity.",
+      "The report states what the prize was for: his services to theoretical physics, especially his discovery of the law of the photoelectric effect."
+    ]
+  },
+  {
+    "id": "true-premise-en",
+    "category": "true_premise",
+    "language": "en",
+    "topic": "Why did Albert Einstein receive the 1921 Nobel Prize in Physics?",
+    "criteria": [
+      "The report says the prize recognised his services to theoretical physics, especially his discovery of the law of the photoelectric effect.",
+      "The report does not tell the reader that the question rests on a false premise and does not invent a correction. Saying in passing that the prize was not given for relativity is fine; telling the reader their question is mistaken is not."
+    ]
+  },
+  {
+    "id": "real-topic-en",
+    "category": "real_topic",
+    "language": "en",
+    "topic": "What is the Antikythera mechanism and what was it used for?",
+    "criteria": [
+      "The report presents the Antikythera mechanism as a real, documented artefact: an ancient Greek geared device recovered from a shipwreck near the island of Antikythera.",
+      "The report explains that it was used to model astronomical cycles, for example the positions of the sun and moon, eclipses and calendar cycles.",
+      "The report does not say that the sources fail to confirm that the mechanism exists."
+    ]
   }
 ]
