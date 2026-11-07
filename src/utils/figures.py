@@ -3,6 +3,9 @@
 import re
 
 from src.utils.claims import extract_claims
+from src.utils.languages import label
+
+MAX_FOUND_SOURCES = 3
 
 _NUMBER = re.compile(r"(\d[\d.,]*\d|\d)(\s?%)?")
 _GROUPED = re.compile(r"\d{1,3}(?:[.,]\d{3})+")
@@ -63,3 +66,19 @@ def number_grounding(report: str, texts: dict[int, dict], topic: str = "") -> di
         "numbers": total, "ungrounded": len(rows), "misplaced": sum(1 for row in rows if row["elsewhere"]),
         "grounding": round(1 - len(rows) / total, 3) if total else None, "rows": rows,
     }
+
+
+def figure_issues(report: str, texts: dict[int, dict], topic: str = "", language: str | None = None) -> list[dict]:
+    """The ungrounded figures of `number_grounding` as fact-check issues ({"claim", "problem"}), one per sentence
+    and worded in the report's language. A figure that another source has is a citation on the wrong source, so
+    the editor is told to cite that one; a figure that no source has is cut or replaced."""
+    by_claim: dict[str, list[str]] = {}
+    for row in number_grounding(report, texts, topic)["rows"]:
+        cited = ", ".join(f"[{n}]" for n in row["cites"])
+        if row["elsewhere"]:
+            found = ", ".join(f"[{n}]" for n in row["elsewhere"][:MAX_FOUND_SOURCES])
+            problem = label(language, "figure_elsewhere").format(figure=row["number"], cited=cited, found=found)
+        else:
+            problem = label(language, "figure_missing").format(figure=row["number"], cited=cited)
+        by_claim.setdefault(row["claim"], []).append(problem)
+    return [{"claim": claim, "problem": " ".join(problems)} for claim, problems in by_claim.items()]

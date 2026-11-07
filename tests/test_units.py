@@ -431,3 +431,36 @@ def test_friendly_error_tells_used_up_credit_from_a_rate_limit():
     assert friendly_error(by_text)["code"] == "quota"
     assert out_of_credit(by_text) and not out_of_credit(RateLimitError("Rate limit reached for requests"))
     assert not out_of_credit(ValueError("insufficient_quota"))
+
+
+FIGURE_SOURCES = {
+    1: {"content": "The law came into force in 2012 and covers risky buildings."},
+    2: {"content": "Law no. 6306 sets the rules. It was amended 15 times."},
+}
+
+
+def test_figure_issues_point_to_the_source_that_has_a_figure_and_cut_one_no_source_has():
+    from src.utils.figures import figure_issues
+
+    report = (
+        "The law numbered 6306 came into force in 2012 [1]. "
+        "It covers 4500 buildings in 2012 [1][2]. "
+        "Both the law numbered 6306 and the 99 percent figure are cited here [1]."
+    )
+    issues = figure_issues(report, FIGURE_SOURCES)
+    assert [i["claim"].split(" ")[0] for i in issues] == ["The", "It", "Both"]
+    elsewhere, missing, both = (i["problem"] for i in issues)
+    assert "6306" in elsewhere and "[1]" in elsewhere and "source(s) [2] contain it" in elsewhere
+    assert "4500" in missing and "any other source" in missing and "[1], [2]" in missing
+    assert "6306" in both and "99" in both  # two figures of one sentence give one issue
+    assert len(issues) == 3
+
+
+def test_figure_issues_are_worded_in_the_reports_language_and_empty_when_every_figure_holds():
+    from src.utils.figures import figure_issues
+
+    issues = figure_issues("Yasa 6306 maddeden oluşur ve 2012'de çıkarıldı [1].", FIGURE_SOURCES, language="tr")
+    assert len(issues) == 1 and "rakamı" in issues[0]["problem"] and "[2]" in issues[0]["problem"]
+    assert figure_issues("The law came into force in 2012 [1].", FIGURE_SOURCES) == []
+    assert figure_issues("The law no. 6306 is in force [1].", FIGURE_SOURCES, topic="What is law 6306?") == []
+    assert figure_issues("No citations, so nothing to check: 6306.", FIGURE_SOURCES) == []
