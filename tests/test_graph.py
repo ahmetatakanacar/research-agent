@@ -184,6 +184,28 @@ def test_used_up_tavily_credits_warn_once_per_analyst_and_the_report_still_gets_
     assert "## Sources" in final["final_report"]
 
 
+def test_credits_running_out_between_two_queries_keep_what_the_first_one_found(llm, monkeypatch):
+    from src.utils.tools import SearchCreditsExhausted
+
+    queries = []
+
+    def web(query, search_depth="basic", max_results=3):
+        queries.append(query)
+        if len(queries) == 2:
+            raise SearchCreditsExhausted("Error 432: usage limit")
+        return fakes.fake_tavily(query)
+
+    monkeypatch.setattr("src.utils.nodes.tavily_search", web)
+    graph = make_graph()
+    config, _ = start(graph, {"max_analyst": 1, "language": "tr", "max_num_turns": 1})
+    final = approve(graph, config)
+
+    assert len(queries) == 2 and queries[1].startswith("english ")
+    assert [w["code"] for w in final["warnings"]] == ["search_credits_exhausted"]
+    web_docs = [d for section in final["sections"] for d in section["sources"] if d["kind"] == "web"]
+    assert web_docs, "the first query's results must not be thrown away"
+
+
 def test_analyst_closing_sentence_ends_the_interview_early(llm):
     llm.close_after = 1
     graph = make_graph()

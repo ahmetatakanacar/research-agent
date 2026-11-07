@@ -199,22 +199,30 @@ def search_web(state: InterviewState):
     if _language(state) != "en" and english and english.lower() != query.lower():
         queries.append(english)
 
-    try:
-        found = [tavily_search(q, SEARCH_DEPTH, SEARCH_CANDIDATES) for q in queries]
-    except SearchCreditsExhausted:
-        # The interview goes on with Wikipedia alone, and the report says so (once per analyst).
-        analyst = _analyst(state["analyst"]).name
-        logger.warning("Tavily credits are used up: %s's interview continues with Wikipedia only", analyst)
-        told = any(w.get("code") == "search_credits_exhausted" and w.get("analyst") == analyst
-                   for w in state.get("warnings") or [])
-        return {"context": [], "warnings": [] if told else [{"code": "search_credits_exhausted", "analyst": analyst}]}
+    found: list = []
+    exhausted = False
+    for q in queries:
+        try:
+            found.append(tavily_search(q, SEARCH_DEPTH, SEARCH_CANDIDATES))
+        except SearchCreditsExhausted:
+            exhausted = True  # the credits can run out between two queries: keep what the earlier ones found
+            break
     candidates: list = []
     seen: set[str] = set()
     for doc in (doc for group in zip_longest(*found) for doc in group if doc):
         if doc["url"] not in seen:
             seen.add(doc["url"])
             candidates.append(doc)
-    return {"context": curate_sources(candidates, query, SEARCH_RESULTS)}
+    update: dict = {"context": curate_sources(candidates, query, SEARCH_RESULTS)}
+    if exhausted:
+        # The report says so, once per analyst.
+        analyst = _analyst(state["analyst"]).name
+        logger.warning("Tavily credits are used up: %s's interview continues without (some) web results", analyst)
+        told = any(w.get("code") == "search_credits_exhausted" and w.get("analyst") == analyst
+                   for w in state.get("warnings") or [])
+        if not told:
+            update["warnings"] = [{"code": "search_credits_exhausted", "analyst": analyst}]
+    return update
 
 
 def search_wikipedia(state: InterviewState):
