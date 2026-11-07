@@ -30,6 +30,7 @@ from src.agent import builder
 from src.runner import out_of_credit
 from src.settings import INTERVIEW_TURNS, SEARCH_DEPTH, get_settings
 from src.usage import UsageTracker
+from src.utils.figures import number_grounding
 
 HERE = Path(__file__).resolve().parent
 CASES_FILE = HERE / "cases.json"
@@ -98,7 +99,7 @@ def score(result: dict, texts: dict[int, dict], case: dict, judge_llm, max_claim
     measured = metrics.evaluate_report(scored["report"], scored["sources"], scored.get("language"))
     scored.update(metrics=measured, checks=metrics.run_checks(measured))
     if texts:
-        scored["numbers"] = metrics.number_grounding(scored["report"], texts, scored.get("topic", ""))
+        scored["numbers"] = number_grounding(scored["report"], texts, scored.get("topic", ""))
     if judge_llm is not None and texts:
         judge_tracker = UsageTracker()
         claims = judge.extract_claims(scored["report"], max_claims)

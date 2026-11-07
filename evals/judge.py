@@ -18,8 +18,8 @@ from typing import List, Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from evals.claims import extract_claims  # noqa: F401  (re-exported for callers and tests)
 from src.runner import out_of_credit
+from src.utils.claims import extract_claims  # noqa: F401  (re-exported for callers and tests)
 from src.utils.sources import strip_sources_section
 
 SOURCE_CHARS = 2500

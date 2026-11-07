@@ -26,9 +26,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from evals import judge, metrics
+from evals import judge
 from evals.run import RESULTS_DIR, make_judge
 from src.usage import UsageTracker
+from src.utils import figures
 
 KINDS = ("misattributed", "number_swapped", "flipped")
 CAUGHT = ("unsupported", "contradicted", "unverified")
@@ -62,13 +63,13 @@ def misattribute(claim: dict, texts: dict[int, dict]) -> dict | None:
     words = _words(claim["text"])
     if not words:
         return None
-    figures = metrics.all_number_forms(claim["text"])
+    claimed = figures.all_number_forms(claim["text"])
     options = []
     for n, source in texts.items():
         content = str(source.get("content") or "")
         if n in claim["cites"] or not content:
             continue
-        if figures & metrics.all_number_forms(content):
+        if claimed & figures.all_number_forms(content):
             continue
         options.append((len(words & _words(content)) / len(words), n))
     options = [option for option in options if option[1] >= FOREIGN_FROM] or options
@@ -80,8 +81,8 @@ def misattribute(claim: dict, texts: dict[int, dict]) -> dict | None:
 def swap_number(claim: dict, texts: dict[int, dict]) -> dict | None:
     available = set()
     for n in claim["cites"]:
-        available |= metrics.all_number_forms(str(texts.get(n, {}).get("content") or ""))
-    for raw in metrics.significant_numbers(claim["text"]):
+        available |= figures.all_number_forms(str(texts.get(n, {}).get("content") or ""))
+    for raw in figures.significant_numbers(claim["text"]):
         if not _PLAIN_NUMBER.fullmatch(raw) or _GROUPED.fullmatch(raw):
             continue
         place = re.search(r"(?<![\d.,])" + re.escape(raw) + r"(?![\d])", claim["text"])
@@ -92,7 +93,7 @@ def swap_number(claim: dict, texts: dict[int, dict]) -> dict | None:
         value = float(raw.replace(",", "."))
         for factor in (1.6, 0.6, 2.7):
             new = f"{value * factor:.{decimals}f}".replace(".", separator)
-            if metrics.number_forms(new) & available:
+            if figures.number_forms(new) & available:
                 continue
             return {**claim, "text": claim["text"][:place.start()] + new + claim["text"][place.end():]}
     return None

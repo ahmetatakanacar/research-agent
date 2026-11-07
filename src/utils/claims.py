@@ -1,4 +1,4 @@
-"""Cited sentences of a report, shared by the free checks and the model-graded ones."""
+"""Cited sentences of a report, shared by the app's fact-check and the evals' free and model-graded checks."""
 
 import re
 

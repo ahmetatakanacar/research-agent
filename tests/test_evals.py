@@ -5,6 +5,7 @@ import pytest
 from langchain_core.runnables import RunnableLambda
 
 from evals import canary, judge, metrics, run
+from src.utils import figures
 from src.utils.languages import LANGUAGES
 
 GOOD_REPORT = """# Title
@@ -140,11 +141,11 @@ def test_figures_in_cited_sentences_must_appear_in_the_cited_sources():
         1: {"content": "A meta-analysis of 6582 adults found a change of 1.29 kg. Three trials were included."},
         2: {"content": "The study ran in 2019."},
     }
-    result = metrics.number_grounding(report, texts)
+    result = figures.number_grounding(report, texts)
     assert result["numbers"] == 5  # 6,582 / 1,29 / 45% / 2019 / 7%, and not the bare 3
     assert [row["number"] for row in result["rows"]] == ["45", "7"]
     assert result["grounding"] == pytest.approx(3 / 5, abs=0.001)
-    assert metrics.number_grounding("## Insights\n\nNothing numeric here at all [1].", texts)["grounding"] is None
+    assert figures.number_grounding("## Insights\n\nNothing numeric here at all [1].", texts)["grounding"] is None
 
 
 def test_a_figure_from_the_question_is_not_a_claim_and_a_misplaced_citation_is_told_from_an_invented_figure():
@@ -152,7 +153,7 @@ def test_a_figure_from_the_question_is_not_a_claim_and_a_misplaced_citation_is_t
               "The law passed in 2012 became the main legal framework [1]. "
               "The programme reached 9,300 households last year [1].\n\n## Sources\n\n1. x\n")
     texts = {1: {"content": "Nothing relevant is said here."}, 2: {"content": "The law passed in 2012 in the end."}}
-    result = metrics.number_grounding(report, texts, topic="The development of the protocol in 1987")
+    result = figures.number_grounding(report, texts, topic="The development of the protocol in 1987")
     assert result["numbers"] == 2  # 1987 comes from the question and is left out
     by_number = {row["number"]: row for row in result["rows"]}
     assert by_number["2012"]["elsewhere"] == [2] and by_number["9,300"]["elsewhere"] == []
