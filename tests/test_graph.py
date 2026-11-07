@@ -323,3 +323,44 @@ def test_a_report_whose_figures_all_hold_is_not_sent_to_the_editor(llm):
         "sources": [{"n": 1, "title": "One", "url": "https://one.example", "content": "It passed in 2012."}],
     }
     assert review_report(state) == {"review_notes": []} and llm.calls == ["review"]
+
+
+class FigureChat(fakes.ScriptedChat):
+    """Writes an introduction that carries a figure no source has."""
+
+    def respond(self, messages):
+        text = super().respond(messages)
+        if self.calls[-1] == "intro":
+            return text.replace("Summary sentence [1].", "It cites 6306 and several other things at length [1].")
+        if self.calls[-1] == "revise":
+            return "# Big Title\n\n## Introduction\n\nIt cites several things at length [1]."
+        return text
+
+
+def test_an_introduction_with_a_figure_no_source_has_goes_to_the_editor(monkeypatch):
+    from src.utils.nodes import write_conclusion, write_introduction
+
+    model = FigureChat(calls=[])
+    monkeypatch.setattr("src.utils.nodes.get_llm", lambda: model)
+    state = {
+        "language": "en", "topic": "a law", "merged_sections": ["A claim [1]."],
+        "sources": [{"n": 1, "title": "One", "url": "https://one.example", "content": "A claim."}],
+    }
+    assert write_introduction(state) == {
+        "introduction": "# Big Title\n\n## Introduction\n\nIt cites several things at length [1]."}
+    assert model.calls == ["intro", "revise"]
+    # a conclusion without a bad figure is not edited
+    assert write_conclusion(state) == {"conclusion": "## Conclusion\n\nSummary sentence [1]."}
+    assert model.calls == ["intro", "revise", "conclusion"]
+
+
+def test_a_failing_editor_leaves_the_introduction_as_written(monkeypatch):
+    from src.utils.nodes import write_introduction
+
+    model = FigureChat(calls=[], fail_on="revise")
+    monkeypatch.setattr("src.utils.nodes.get_llm", lambda: model)
+    state = {
+        "language": "en", "topic": "a law", "merged_sections": ["A claim [1]."],
+        "sources": [{"n": 1, "title": "One", "url": "https://one.example", "content": "A claim."}],
+    }
+    assert "6306" in write_introduction(state)["introduction"]

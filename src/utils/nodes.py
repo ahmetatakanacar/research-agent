@@ -332,8 +332,8 @@ def _intro_or_conclusion(state: ResearchGraphState, request: str) -> str:
         logger.info("Section written without citations; asking once more with a reminder")
         retried = text_of(get_llm().invoke([system, HumanMessage(content=request + CITATION_REMINDER)]))
         if CITE_RE.search(retried):
-            return retried
-    return text
+            text = retried
+    return _fix_figures(state, text)
 
 
 def _edit(language: str, text: str, issues: list[dict]) -> str:
@@ -346,6 +346,23 @@ def _edit(language: str, text: str, issues: list[dict]) -> str:
         )),
         HumanMessage(content="Return the corrected report."),
     ])).strip()
+
+
+def _fix_figures(state: ResearchGraphState, text: str) -> str:
+    """The introduction and the conclusion are written beside the fact-checked body, so the fact-check never sees
+    them. Their figures are checked here against every source gathered, and the editor is asked once when one is
+    not there. The text is kept as it was when anything goes wrong."""
+    language = normalize_language(state.get("language"))
+    try:
+        issues = figure_issues(
+            text, {s["n"]: s for s in state.get("sources") or []}, state.get("topic", ""), language)
+        if not issues:
+            return text
+        revised = _edit(language, text, issues)
+    except Exception:
+        logger.warning("Figure check failed; keeping the text as written", exc_info=True)
+        return text
+    return revised if revised and len(revised) >= 0.5 * len(text) else text
 
 
 def write_introduction(state: ResearchGraphState):
