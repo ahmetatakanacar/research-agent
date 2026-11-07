@@ -8,6 +8,7 @@ from langgraph.config import get_stream_writer
 from langgraph.types import interrupt
 
 from src.settings import SEARCH_CANDIDATES, SEARCH_DEPTH, SEARCH_RESULTS
+from src.utils.figures import figure_issues
 from src.utils.languages import label, language_instruction, language_name, normalize_language
 from src.utils.models import get_fast_llm, get_llm
 from src.utils.objects import Analyst, Perpectives, ReviewResult, SearchQuery, SourcePicks
@@ -335,6 +336,18 @@ def _intro_or_conclusion(state: ResearchGraphState, request: str) -> str:
     return text
 
 
+def _edit(language: str, text: str, issues: list[dict]) -> str:
+    """The editor's pass: the text again, with the problems found in it fixed."""
+    return text_of(get_llm().invoke([
+        SystemMessage(content=revise_instructions.format(
+            issues="\n".join(f"- {i['claim']} -> {i['problem']}" for i in issues),
+            report=text,
+            language_instruction=language_instruction(language),
+        )),
+        HumanMessage(content="Return the corrected report."),
+    ])).strip()
+
+
 def write_introduction(state: ResearchGraphState):
     return {"introduction": _intro_or_conclusion(state, "Write the report introduction")}
 
@@ -359,22 +372,25 @@ def review_report(state: ResearchGraphState):
         return {"review_notes": []}
 
     try:
+        # Free and precise, so these come first: a figure that the sentence's own sources do not contain. Every
+        # source gathered is searched for it, not only those cited in this text: the right one may not be.
+        everything = {s["n"]: s for s in state.get("sources") or []}
+        figures = figure_issues(content, everything, state.get("topic", ""), language)
+    except Exception:
+        logger.warning("Figure check failed; the model's fact-check goes on without it", exc_info=True)
+        figures = []
+
+    try:
         checker = get_llm().with_structured_output(ReviewResult, method="function_calling")
         result = checker.invoke([SystemMessage(content=review_instructions.format(
             language=language_name(language), report=content, sources=_sources_for_review(sources),
         ))])
-        issues = [issue.model_dump() for issue in (result.issues if result else [])][:REVIEW_MAX_ISSUES]
+        found = [issue.model_dump() for issue in (result.issues if result else [])]
+        issues = (figures + found)[:REVIEW_MAX_ISSUES]
         if not issues:
             return {"review_notes": []}
 
-        revised = text_of(get_llm().invoke([
-            SystemMessage(content=revise_instructions.format(
-                issues="\n".join(f"- {i['claim']} -> {i['problem']}" for i in issues),
-                report=content,
-                language_instruction=language_instruction(language),
-            )),
-            HumanMessage(content="Return the corrected report."),
-        ])).strip()
+        revised = _edit(language, content, issues)
     except Exception:
         logger.warning("Fact-check failed; keeping the unreviewed draft", exc_info=True)
         return {"review_notes": [], "warnings": [{"code": "review_failed"}]}

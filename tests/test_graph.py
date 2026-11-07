@@ -296,3 +296,30 @@ def test_studio_graphs_compile(graph_name):
     module_path, attribute = spec.removeprefix("./").split(":")
     module = import_module(module_path.removesuffix(".py").replace("/", "."))
     assert getattr(module, attribute) is not None
+
+
+def test_a_figure_the_cited_source_lacks_goes_to_the_editor_even_when_the_model_finds_nothing(llm):
+    from src.utils.nodes import review_report
+
+    state = {
+        "language": "en", "topic": "a law", "content": "It passed in 2012 with 6306 articles [1].",
+        "sources": [
+            {"n": 1, "title": "One", "url": "https://one.example", "content": "It passed in 2012."},
+            {"n": 2, "title": "Two", "url": "https://two.example", "content": "The text has 6306 articles."},
+        ],
+    }
+    update = review_report(state)
+
+    assert llm.calls == ["review", "revise"]  # the editor ran although the model's own fact-check found nothing
+    [note] = update["review_notes"]
+    assert "6306" in note["claim"] and "[2]" in note["problem"] and note["fixed"] is True
+
+
+def test_a_report_whose_figures_all_hold_is_not_sent_to_the_editor(llm):
+    from src.utils.nodes import review_report
+
+    state = {
+        "language": "en", "topic": "a law", "content": "It passed in 2012 [1].",
+        "sources": [{"n": 1, "title": "One", "url": "https://one.example", "content": "It passed in 2012."}],
+    }
+    assert review_report(state) == {"review_notes": []} and llm.calls == ["review"]
