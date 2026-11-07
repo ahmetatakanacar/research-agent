@@ -364,3 +364,32 @@ def test_a_failing_editor_leaves_the_introduction_as_written(monkeypatch):
         "sources": [{"n": 1, "title": "One", "url": "https://one.example", "content": "A claim."}],
     }
     assert "6306" in write_introduction(state)["introduction"]
+
+
+def test_the_fact_checker_is_told_todays_date(monkeypatch):
+    from datetime import date
+
+    from langchain_core.runnables import RunnableLambda
+
+    from src.utils.nodes import review_report
+
+    class Recording(fakes.ScriptedChat):
+        seen: list = []
+
+        def with_structured_output(self, schema, **kwargs):
+            inner = super().with_structured_output(schema, **kwargs)
+
+            def run(messages):
+                self.seen.append(fakes.system_text(messages))
+                return inner.invoke(messages)
+
+            return RunnableLambda(run)
+
+    model = Recording(calls=[])
+    monkeypatch.setattr("src.utils.nodes.get_llm", lambda: model)
+    state = {
+        "language": "en", "topic": "a law", "content": "It passed in 2012 [1].",
+        "sources": [{"n": 1, "title": "One", "url": "https://one.example", "content": "It passed in 2012."}],
+    }
+    review_report(state)
+    assert f"Today's date is {date.today().isoformat()}" in model.seen[0]

@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 from itertools import zip_longest
 
 from dotenv import load_dotenv
@@ -401,6 +402,7 @@ def review_report(state: ResearchGraphState):
         checker = get_llm().with_structured_output(ReviewResult, method="function_calling")
         result = checker.invoke([SystemMessage(content=review_instructions.format(
             language=language_name(language), report=content, sources=_sources_for_review(sources),
+            today=date.today().isoformat(),
         ))])
         found = [issue.model_dump() for issue in (result.issues if result else [])]
         issues = (figures + found)[:REVIEW_MAX_ISSUES]

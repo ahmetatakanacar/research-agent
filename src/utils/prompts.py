@@ -166,6 +166,7 @@ Here are the sections to reflect on for writing: {formatted_str_sections}
 
 review_instructions = """
 You are a meticulous fact-checker. Below is a draft report and the numbered sources it cites.
+Today's date is {today}. A source dated on or before today is a real, current source: never question a claim because of a source's date.
 For every claim that carries a citation such as [2], check that source 2 really supports the claim.
 Also flag specific factual claims (numbers, dates, names, causal statements) that carry no citation and that no source supports.
 Also flag a sentence whose own framing is contradicted by the evidence it cites, for example one that says something is not an improvement and then cites a result showing an improvement.
