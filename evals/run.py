@@ -160,7 +160,12 @@ def slim(result: dict) -> dict:
     """The part of a result that is kept in summary.json and compared between runs."""
     if "error" in result:
         return {"error": result["error"]}
-    row = {"metrics": result["metrics"], "checks": result["checks"], "usage": result["usage"]}
+    notes = result.get("review_notes") or []
+    review = {
+        "issues": len(notes), "unfixed": sum(1 for note in notes if not note.get("fixed")),
+        "failed": sum(1 for w in result.get("warnings") or [] if w.get("code") == "review_failed"),
+    }
+    row = {"metrics": result["metrics"], "checks": result["checks"], "usage": result["usage"], "review": review}
     for key in ("numbers", "claims", "coverage"):
         if key in result:
             row[key] = {k: v for k, v in result[key].items() if k != "rows"}
@@ -198,6 +203,9 @@ def aggregate(rows: list[dict]) -> dict:
 
     graded = [row["rubric"]["passed"] for row in ok if row.get("rubric") and row["rubric"]["passed"] is not None]
     agg["honesty_pass_rate"] = round(sum(graded) / len(graded), 3) if graded else None
+    reviewed = [row["review"] for row in ok if row.get("review")]
+    for name in ("issues", "unfixed", "failed"):
+        agg[f"review_{name}"] = sum(r[name] for r in reviewed) if reviewed else None
     agg["tokens"] = sum(row["usage"]["total_tokens"] + row.get("judge_usage", {}).get("total_tokens", 0) for row in ok)
     agg["seconds_mean"] = round(statistics.fmean(row["usage"]["elapsed"] for row in ok), 1) if ok else None
     return agg

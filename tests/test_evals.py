@@ -644,6 +644,17 @@ def test_rescoring_a_folder_writes_a_new_run_and_costs_nothing_without_a_judge(l
     assert "Nothing was run" in capsys.readouterr().out
 
 
+def test_review_notes_are_counted_in_the_summary():
+    notes = [{"claim": "a", "problem": "b", "fixed": True}, {"claim": "c", "problem": "d", "fixed": False}]
+    result = {**_finished("demo"), "review_notes": notes, "warnings": [{"code": "review_failed"}]}
+    row = run.slim(result)
+    assert row["review"] == {"issues": 2, "unfixed": 1, "failed": 1}
+
+    agg = run.aggregate([row, run.slim(_finished("other"))])
+    assert (agg["review_issues"], agg["review_unfixed"], agg["review_failed"]) == (2, 1, 1)
+    assert run.aggregate([_row()])["review_issues"] is None
+
+
 def test_cases_given_to_a_rescore_or_a_canary_include_every_try_of_them(tmp_path):
     for name in ("demo", "demo#2", "other"):
         saved = {**_finished(name.split("#")[0]), "id": name, "source_texts": {"1": {"content": "x"}}}
