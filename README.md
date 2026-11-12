@@ -1,8 +1,10 @@
-English | [Türkçe](README.tr.md)
-
 # research-agent
 
 A multi-agent research assistant built on LangGraph. Give it a topic and it assembles a team of AI analysts, lets you review the team, has every analyst interview an "expert" that can only answer from retrieved web and Wikipedia sources, and merges the interviews into one report with numbered citations. A web UI (English / Türkçe) shows the work live, keeps a history and exports the result.
+
+## Demo
+
+<!-- Add the demo video here. On GitHub, open this file in the editor and drag research-agent-demo.mp4 into this spot: GitHub uploads it and inserts a link on its own line, which shows as a video player. -->
 
 ## Why this exists
 
@@ -249,6 +251,47 @@ pytest -q
 The whole graph is tested offline with a scripted chat model and stubbed searches ([tests/fakes.py](tests/fakes.py)), so no API keys are needed. The tests cover the graph end to end, the citation and ranking logic, the HTTP API (streaming, replay, cancel and resume, limits, auth, headers) and the helpers. The browser tests in `tests/e2e` drive the real UI against a real server; they need a browser (`playwright install chromium`, or `E2E_BROWSER_CHANNEL=msedge` to use an installed Edge) and are skipped without one. CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs ruff and the full test suite.
 
 For prompt-level debugging set `LANGSMITH_TRACING_V2=true` and `LANGSMITH_API_KEY` to trace every run in LangSmith.
+
+### Evals
+
+The tests check that the code works; they cannot tell whether the reports got better or worse. [evals/](evals) can. It runs the real agent on a fixed set of topics ([evals/cases.json](evals/cases.json)) and scores the reports. The set is balanced on purpose: technical, medical, local, economics, cultural and opinion topics in English and Türkçe, fictional topics and questions with a false premise that must be refused or corrected, and their opposites (a real but unusual topic and a question with a true premise) that must not be. An eval that only rewards refusing would reward an agent that always refuses.
+
+```bash
+python -m evals.run --smoke --yes                          # 3 English cases
+python -m evals.run --yes --label before-change            # all 14 cases
+python -m evals.run --yes --baseline evals/results/<run>   # compare with an earlier run
+python -m evals.run --yes --trials 3 --cases rag-en        # three isolated tries of one case: pass@3, pass^3
+python -m evals.run --rescore evals/results/<run> --yes    # score saved reports again, no agent run
+python -m evals.canary evals/results/<run> --yes           # check the judge against claims with a known answer
+```
+
+A run calls the real models and search, so it spends OpenAI and Tavily credits; without `--yes` it only prints the plan. Reports, sources and scores are saved under `evals/results/` (not committed).
+
+What is scored. Wherever code can decide, code decides; the model judge is used only where it has to be.
+
+- **Hard checks** (free, no model): the report has an introduction, body and conclusion; every `[n]` resolves to a source and every source is cited; at most three citations per statement, sorted, before the punctuation; introduction, body and conclusion all carry citations; no duplicate sources (same URL, or the same title on the same site); no blocked hosts; no cut-off or very long titles; no sentences in the wrong language (for example an English quotation in a Türkçe report). It also reports word count, sub-headings, source count, the share of authoritative sources, the largest share held by one site and the number of marketing pages. The summary shows how often each check passes: a check that fails in every case is more likely broken than ten bad reports, and one that never fails only guards against regressions.
+- **Figures** (free, no model): every number in a cited sentence must appear in a source that sentence cites. A figure the report works out itself (a sum, a difference) is listed too, so read the listed rows before calling one invented.
+- **Faithfulness** (model judge): the report is split into its cited sentences (up to 24 per report, evenly sampled). For each one the judge first copies, word for word, the passage of a cited source that backs or contradicts it, reasons about it, then gives a verdict: supported, partial, unsupported, contradicted, not a claim, or unknown (it may decline to guess). Code then checks that the quote really is in a cited source; a favourable verdict without a real quote becomes `unverified`. A batch shows the judge the sources of all its sentences together, and it sometimes quoted a source that the sentence does not cite, so an `unverified` sentence is asked about again, alone and with only its own sources. The score is (supported + ½ partial) / judged claims; unsupported, contradicted and unverified claims are also counted on their own, and unknown ones are left out and counted.
+- **Coverage** (model judge, one call per point): each normal case lists the key points a good report must make, written by hand from well-established facts. A point is covered only with a quote that code finds in the report.
+- **Honesty criteria** (model judge, one call per criterion): every criterion of a fictional, false-premise, true-premise or real-topic case is graded on its own, and the case passes only when all are met.
+- **Fact-check work**: how many problems the app's own fact-check found in each report (`review_issues`), how many it could not fix (`review_unfixed`) and how many fact-checks failed outright (`review_failed`). A report that needed many fixes was written less carefully even if the fixed report scores well. The figures of the introduction and the conclusion are fixed separately and are not counted here.
+- **Tries**: with `--trials N` each case runs N times from a clean state. A try passes when every hard check holds and no honesty criterion fails; the summary gives pass@N (at least one try passes) and pass^N (every try passes), which is the one that matters for an agent people rely on.
+- **Cost**: tokens and seconds per case. Measured on the English smoke set: roughly 70–80k tokens for the agent (two analysts) and 14–29k for the judge per case, and a full run of the 14 cases is about 1.3 million tokens. Türkçe cases cost more.
+
+#### Is the judge right?
+
+Anthropic's guidance for model graders is to calibrate them against known answers before trusting their numbers. `evals.canary` takes the reports of an earlier run and builds claims whose right verdict is known without asking any model: an unchanged sentence, the same sentence citing a source on another topic, a figure replaced by one that no source contains, and (English only) a reversed word such as increase to decrease. It judges them without telling the judge which is which and prints how many it caught, which unchanged sentences it rejected and which altered ones it let through.
+
+On the three smoke reports (judge version `61d58ad9`): none of 32 unchanged sentences was rejected; all 27 sentences citing an unrelated source were caught; of 8 subtly altered sentences (a changed figure or a reversed word), 4 were caught outright, 2 only as partial and 2 were missed (a "cannot" in the second half of a sentence whose first half the source backs).
+
+Read the numbers with these limits in mind:
+
+- That is a small sample, and the judge prompt was revised once after the first calibration, so those numbers are no longer independent evidence. Run the canary again whenever the judge prompt, the judge model or the way verdicts are reached changes; the judge version printed with every run changes with them, and `--baseline` warns when a baseline was graded by a different version.
+- Subtle changes inside a long sentence are the judge's weak spot: faithfulness is closer to an upper bound than an exact figure, and a changed figure is often graded partial, which is why figures are also checked in code.
+- The default judge is the model that also writes the reports, so they can share blind spots; `--judge-model` picks another one.
+- The judge reads the first 2,500 characters of the text the agent kept for each source (the sources of the smoke set are shorter than that), so a claim backed only by a later part of a longer page would count as unsupported.
+- Fourteen cases, one run each, with non-deterministic models and search: differences of a few points are noise, which is what `--trials` is for. Key points that every report already makes only guard against regressions; add harder ones as the agent improves.
+- The authority share uses the app's own domain heuristic (a primary source such as nobelprize.org is not counted), so it describes the source mix, not whether a report is right.
 
 ## Good to know
 
