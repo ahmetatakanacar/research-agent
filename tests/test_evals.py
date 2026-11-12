@@ -655,12 +655,13 @@ def test_review_notes_are_counted_in_the_summary():
     assert run.aggregate([_row()])["review_issues"] is None
 
 
-def test_cases_given_to_a_rescore_or_a_canary_include_every_try_of_them(tmp_path):
+def test_cases_given_to_a_rescore_or_a_canary_include_every_try_of_them(tmp_path, capsys):
     for name in ("demo", "demo#2", "other"):
         saved = {**_finished(name.split("#")[0]), "id": name, "source_texts": {"1": {"content": "x"}}}
         (tmp_path / f"{name}.json").write_text(json.dumps(saved), encoding="utf-8")
     assert {s["id"] for s in run.load_saved(str(tmp_path), ["demo"])} == {"demo", "demo#2"}
     assert canary.main([str(tmp_path), "--cases", "demo"]) == 0
+    assert "2 report(s)" in capsys.readouterr().out
 
 
 def test_a_baseline_graded_by_another_judge_version_is_flagged(llm, tmp_path, monkeypatch, capsys):
