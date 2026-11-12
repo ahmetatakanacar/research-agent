@@ -271,7 +271,7 @@ def load_saved(folder: str, ids: list[str] | None) -> list[dict]:
     if not path.is_dir():
         raise SystemExit(f"Not a results folder: {path}")
     saved = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(path.glob("*.json")) if p.name != "summary.json"]
-    saved = [s for s in saved if "report" in s and (ids is None or s["id"] in ids)]
+    saved = [s for s in saved if "report" in s and (ids is None or s.get("case_id", s["id"]) in ids)]
     if not saved:
         raise SystemExit(f"No saved reports found in {path}")
     return saved

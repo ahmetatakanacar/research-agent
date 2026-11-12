@@ -242,7 +242,7 @@ def main(argv=None) -> int:
         raise SystemExit(f"Not a results folder: {folder}")
     ids = args.cases.split(",") if args.cases else None
     saved = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(folder.glob("*.json")) if p.name != "summary.json"]
-    saved = [s for s in saved if s.get("source_texts") and (ids is None or s["id"] in ids)]
+    saved = [s for s in saved if s.get("source_texts") and (ids is None or s.get("case_id", s["id"]) in ids)]
     if not saved:
         raise SystemExit(f"No saved reports with source texts in {folder}")
     print(f"{len(saved)} report(s), up to {args.per_report} claims each, each shown once unchanged and once altered.")

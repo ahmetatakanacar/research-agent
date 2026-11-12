@@ -644,6 +644,14 @@ def test_rescoring_a_folder_writes_a_new_run_and_costs_nothing_without_a_judge(l
     assert "Nothing was run" in capsys.readouterr().out
 
 
+def test_cases_given_to_a_rescore_or_a_canary_include_every_try_of_them(tmp_path):
+    for name in ("demo", "demo#2", "other"):
+        saved = {**_finished(name.split("#")[0]), "id": name, "source_texts": {"1": {"content": "x"}}}
+        (tmp_path / f"{name}.json").write_text(json.dumps(saved), encoding="utf-8")
+    assert {s["id"] for s in run.load_saved(str(tmp_path), ["demo"])} == {"demo", "demo#2"}
+    assert canary.main([str(tmp_path), "--cases", "demo"]) == 0
+
+
 def test_a_baseline_graded_by_another_judge_version_is_flagged(llm, tmp_path, monkeypatch, capsys):
     case = next(c for c in run.load_cases() if c["id"] == "rag-en")
     saved = json.loads(json.dumps(run.run_case(case, analysts=1)))
