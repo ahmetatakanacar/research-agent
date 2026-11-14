@@ -160,10 +160,25 @@ def test_tidy_citations_is_idempotent():
 
 def test_tidy_citations_caps_a_group_keeping_the_most_authoritative_sources():
     authority = {1: 0.0, 2: 0.25, 3: 0.0, 4: 0.25, 5: 0.25, 6: 0.0}
-    assert tidy_citations("claim [1][2][3][4][5][6].", cap=3, priority=authority.get) == "claim [2][4][5]."
-    assert tidy_citations("claim [3][1][2].", cap=3, priority=authority.get) == "claim [1][2][3]."
+
+    def rank(n, statement):
+        return authority[n]
+
+    assert tidy_citations("claim [1][2][3][4][5][6].", cap=3, priority=rank) == "claim [2][4][5]."
+    assert tidy_citations("claim [3][1][2].", cap=3, priority=rank) == "claim [1][2][3]."
     assert tidy_citations("claim [1][2][3][4].", cap=3) == "claim [1][2][3]."
-    assert tidy_citations("one [1]. two [2][3][4][5].", cap=2, priority=authority.get) == "one [1]. two [2][4]."
+    assert tidy_citations("one [1]. two [2][3][4][5].", cap=2, priority=rank) == "one [1]. two [2][4]."
+
+
+def test_tidy_citations_ranks_a_group_by_its_own_statement():
+    seen = []
+
+    def rank(n, statement):
+        seen.append(statement)
+        return n == 4 and "rose" in statement
+
+    assert tidy_citations("It fell [9]. Sales rose [1][2][3][4].", cap=3, priority=rank) == "It fell [9]. Sales rose [1][2][4]."
+    assert set(seen) == {"Sales rose "}
 
 
 def test_tidy_citations_also_fixes_groups_glued_to_the_period():

@@ -1,5 +1,5 @@
 import re
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 from src.utils.objects import SourceDoc
 from src.utils.ranking import page_key
@@ -122,6 +122,7 @@ _CITE_RUN = r"\[\d{1,3}\](?:[ \t]*\[\d{1,3}\])*"
 _AFTER_SENTENCE_END = re.compile(rf"(\S+?)([.!?])[ \t]*({_CITE_RUN})(?=\s|$)")
 _ADJACENT_GROUPS = re.compile(r"\[\d{1,3}\](?:[ \t]*\[\d{1,3}\])+")
 _ABBREVIATIONS = frozenset({"e.g", "i.e", "etc", "vs", "cf", "al", "approx", "no", "fig"})
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 def _movable(word: str) -> bool:
@@ -135,9 +136,16 @@ def count_misplaced_citations(text: str) -> int:
     return sum(1 for match in _AFTER_SENTENCE_END.finditer(text) if _movable(match.group(1)))
 
 
+def _statement_before(text: str, end: int) -> str:
+    """The statement a citation group at `end` belongs to: the text back to the previous sentence end."""
+    return _SENTENCE_END.split(text[max(0, end - 1000):end])[-1]
+
+
 def tidy_citations(
-    text: str, cap: int | None = None, priority: Callable[[int], float] | None = None
+    text: str, cap: int | None = None, priority: Callable[[int, str], Any] | None = None
 ) -> str:
+    """Move citation groups before the sentence's punctuation and merge neighbouring groups. Over `cap`, the
+    group keeps the sources that `priority(n, statement)` ranks highest, the lower numbers first on a tie."""
     def move_before_punctuation(match: re.Match) -> str:
         word, mark, cites = match.groups()
         if not _movable(word):
@@ -147,8 +155,10 @@ def tidy_citations(
     def merge(match: re.Match) -> str:
         numbers = sorted({int(n) for n in re.findall(r"\d+", match.group(0))})
         if cap and len(numbers) > cap:
-            rank = priority or (lambda _n: 0.0)
-            numbers = sorted(sorted(numbers, key=lambda n: (-rank(n), n))[:cap])
+            statement = _statement_before(match.string, match.start())
+            rank = priority or (lambda _n, _statement: 0)
+            # sorted() is stable with reverse=True too, so equal ranks keep the lower numbers first
+            numbers = sorted(sorted(numbers, key=lambda n: rank(n, statement), reverse=True)[:cap])
         return "".join(f"[{n}]" for n in numbers)
 
     return _ADJACENT_GROUPS.sub(merge, _AFTER_SENTENCE_END.sub(move_before_punctuation, text))

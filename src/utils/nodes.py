@@ -9,7 +9,7 @@ from langgraph.config import get_stream_writer
 from langgraph.types import interrupt
 
 from src.settings import SEARCH_CANDIDATES, SEARCH_DEPTH, SEARCH_RESULTS
-from src.utils.figures import figure_issues
+from src.utils.figures import all_number_forms, figure_issues, number_forms, significant_numbers
 from src.utils.languages import label, language_instruction, language_name, normalize_language
 from src.utils.models import get_fast_llm, get_llm
 from src.utils.objects import Analyst, Perpectives, ReviewResult, SearchQuery, SourcePicks
@@ -431,7 +431,15 @@ def finalize_report(state: ResearchGraphState):
     ]
     sources = state.get("sources") or []
     authority = {source["n"]: quality_bonus(source["url"]) for source in sources}
-    capped = [tidy_citations(part, MAX_CITATIONS_PER_STATEMENT, lambda n: authority.get(n, 0.0)) for part in parts]
+    figures = {source["n"]: all_number_forms(str(source.get("content") or "")) for source in sources}
+
+    def priority(n: int, statement: str) -> tuple[int, float]:
+        # A source that holds the statement's figures comes first, or capping would drop the figure's only backing.
+        known = figures.get(n, set())
+        backed = sum(1 for raw in significant_numbers(CITE_RE.sub("", statement)) if number_forms(raw) & known)
+        return backed, authority.get(n, 0.0)
+
+    capped = [tidy_citations(part, MAX_CITATIONS_PER_STATEMENT, priority) for part in parts]
     renumbered, used = finalize_citations(capped, sources)
     introduction, content, conclusion = (tidy_citations(part) for part in renumbered)
 

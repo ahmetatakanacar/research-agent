@@ -259,6 +259,26 @@ def test_finalized_report_never_cites_more_than_three_sources_for_one_statement(
     ]
 
 
+def test_capping_a_group_keeps_the_source_that_holds_the_statements_figure():
+    sources = [
+        {"n": 1, "url": "https://docs.example.org/a", "title": "A", "content": "Background."},
+        {"n": 2, "url": "https://cs.stanford.edu/b", "title": "B", "content": "More background."},
+        {"n": 3, "url": "https://nature.com/c", "title": "C", "content": "Even more."},
+        {"n": 4, "url": "https://blog-d.com/p", "title": "D", "content": "Usage grew by 37% in 2024."},
+    ]
+    out = nodes.finalize_report({
+        "language": "en",
+        "sources": sources,
+        "introduction": "# T\n\n## Introduction\n\nIntro [1].",
+        "content": "## Insights\n\nUsage grew by 37% [1][2][3][4]. Then more [1][2][3][4].",
+        "conclusion": "## Conclusion\n\nEnd [2].",
+    })
+    report = out["final_report"]
+    hosts = {s["n"]: s["url"].split("/")[2] for s in out["final_sources"]}
+    assert "Usage grew by 37% [1][2][3]." in report and hosts[3] == "blog-d.com"  # the only source with 37%
+    assert "Then more [1][2][4]." in report and hosts[4] == "nature.com"  # no figure: the most authoritative stay
+
+
 def test_tavily_is_told_to_skip_social_and_video_sites(monkeypatch):
     captured = {}
 
