@@ -158,9 +158,14 @@ def tavily_search(query: str, search_depth: str = "basic", max_results: int = 3)
     try:
         data = _get_tavily(depth, min(limit * TAVILY_CANDIDATE_FACTOR, TAVILY_MAX_CANDIDATES)).invoke({"query": query})
     except Exception as exc:
-        if _CREDITS_EXHAUSTED.search(str(exc)):
-            raise SearchCreditsExhausted(str(exc)) from exc
-        logger.warning("Tavily search failed for query %r", query, exc_info=True)
+        data = {"error": exc}
+    # The tool returns most API failures as {"error": exception} instead of raising them.
+    error = data.get("error") if isinstance(data, dict) else None
+    if error is not None:
+        cause = error if isinstance(error, BaseException) else None
+        if _CREDITS_EXHAUSTED.search(str(error)):
+            raise SearchCreditsExhausted(str(error)) from cause
+        logger.warning("Tavily search failed for query %r: %s", query, error, exc_info=cause)
         return []
 
     results = data.get("results", []) if isinstance(data, dict) else []

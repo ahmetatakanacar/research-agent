@@ -101,6 +101,26 @@ def test_tavily_search_reports_used_up_credits_but_not_other_failures(monkeypatc
         assert tools.tavily_search("q") == []
 
 
+def test_tavily_search_sees_the_failures_the_real_tool_returns_instead_of_raising(monkeypatch):
+    # The real tool catches API errors and returns {"error": exception}; only its HTTP call is faked here.
+    monkeypatch.setenv("TAVILY_API_KEY", "test-tavily")
+    tool = tools.TavilySearch(max_results=5)
+    monkeypatch.setattr(tools, "_get_tavily", lambda depth, n: tool)
+
+    def answer(message):
+        def raw_results(*args, **kwargs):
+            raise ValueError(message)
+
+        monkeypatch.setattr(type(tool.api_wrapper), "raw_results", raw_results)
+
+    answer("Error 432: This request exceeds your plan's set usage limit.")
+    assert "error" in tool.invoke({"query": "q"})
+    with pytest.raises(tools.SearchCreditsExhausted):
+        tools.tavily_search("q")
+    answer("Error 500: boom")
+    assert tools.tavily_search("q") == []
+
+
 def test_tavily_search_over_fetches_and_keeps_the_best_sources(monkeypatch):
     seen = []
 
