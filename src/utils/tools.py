@@ -58,6 +58,7 @@ _UNAVAILABLE = [
     (re.compile(r"\bError (?:432|433)\b"), SearchCreditsExhausted),
     (re.compile(r"\bError 401\b"), SearchKeyRejected),
 ]
+UNAVAILABLE_CODES = frozenset(unavailable.code for _, unavailable in _UNAVAILABLE)
 
 
 class WikipediaRateLimited(Exception):

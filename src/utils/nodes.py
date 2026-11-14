@@ -39,7 +39,7 @@ from src.utils.sources import (
     unique_documents,
 )
 from src.utils.states import GenerateAnalystState, InterviewState, ResearchGraphState
-from src.utils.tools import SearchUnavailable, tavily_search, wikipedia_search
+from src.utils.tools import UNAVAILABLE_CODES, SearchUnavailable, tavily_search, wikipedia_search
 
 load_dotenv()
 
@@ -195,6 +195,8 @@ def curate_sources(docs: list, query: str, limit: int) -> list:
 
 
 def search_web(state: InterviewState):
+    if any(w.get("code") in UNAVAILABLE_CODES for w in state.get("warnings") or []):
+        return {"context": []}  # an earlier turn found Tavily unavailable: every later search fails the same way
     query = _query(state)
     english = (state.get("english_query") or "").strip()
     queries = [query]
@@ -217,13 +219,10 @@ def search_web(state: InterviewState):
             candidates.append(doc)
     update: dict = {"context": curate_sources(candidates, query, SEARCH_RESULTS)}
     if unavailable:
-        # The report says so, once per analyst.
+        # The report says so, once per analyst: the later turns of this interview no longer search.
         analyst = _analyst(state["analyst"]).name
-        logger.warning("Tavily is unavailable (%s): %s's interview continues without (some) web results",
-                       unavailable, analyst)
-        told = any(w.get("code") == unavailable and w.get("analyst") == analyst for w in state.get("warnings") or [])
-        if not told:
-            update["warnings"] = [{"code": unavailable, "analyst": analyst}]
+        logger.warning("Tavily is unavailable (%s): %s's interview continues with Wikipedia alone", unavailable, analyst)
+        update["warnings"] = [{"code": unavailable, "analyst": analyst}]
     return update
 
 
