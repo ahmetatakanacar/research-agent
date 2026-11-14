@@ -52,7 +52,18 @@ def test_a_clean_report_passes_every_hard_check():
     assert measured["dangling_citations"] == 0 and measured["uncited_sources"] == 0
     assert measured["max_group_size"] == 2
     assert measured["authority_share"] == pytest.approx(0.667, abs=0.001)
+    assert measured["wikipedia_share"] == 0
     assert all(metrics.run_checks(measured).values())
+
+
+def test_a_report_from_wikipedia_alone_is_pointed_out(capsys):
+    sources = [{**source, "kind": "wikipedia"} for source in GOOD_SOURCES]
+    measured = metrics.evaluate_report(GOOD_REPORT, sources, "en")
+    assert measured["wikipedia_share"] == 1
+    row = {"id": "demo", "metrics": measured, "checks": metrics.run_checks(measured),
+           "usage": {"total_tokens": 1, "elapsed": 1.0}}
+    run.print_table([row])
+    assert "only Wikipedia sources" in capsys.readouterr().out
 
 
 def test_a_messy_report_fails_the_matching_checks():
@@ -462,6 +473,15 @@ def test_aggregate_summarises_checks_faithfulness_honesty_numbers_and_coverage()
     assert agg["coverage"] == pytest.approx(4 / 6, abs=0.001)
     assert agg["hard_checks_passed"] == pytest.approx(1 - 1 / (2 * len(metrics.HARD_CHECKS)), abs=0.001)
     assert agg["tokens"] == 2000
+
+
+def test_a_baseline_without_a_newer_metric_still_aggregates_and_compares():
+    old = _row()
+    new = _row()
+    new["metrics"]["wikipedia_share"] = 0.25
+    assert run.aggregate([old])["wikipedia_share"] is None
+    assert run.aggregate([old, new])["wikipedia_share"] == 0.25
+    assert not any("wikipedia_share" in line for line in run.compare(run.aggregate([old]), run.aggregate([new])))
 
 
 def test_aggregate_without_a_judge_leaves_model_graded_fields_empty():

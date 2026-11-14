@@ -40,7 +40,8 @@ TOKENS_PER_ANALYST = 40_000  # measured on a full run: ~105k per English case an
 JUDGE_TOKENS_PER_CASE = 25_000
 TAVILY_CREDITS_PER_QUERY = {"basic": 1, "advanced": 2}
 SCORED_KEYS = ("metrics", "checks", "numbers", "claims", "rubric", "coverage", "judge_usage")
-MEAN_KEYS = ("words", "subheadings", "sources", "authority_share", "max_host_share", "marketing_sources")
+MEAN_KEYS = ("words", "subheadings", "sources", "authority_share", "wikipedia_share", "max_host_share",
+             "marketing_sources")
 SAME_MODEL = "app default (the model that writes the reports)"
 SEARCH_STOPS = {
     "search_credits_exhausted": "the Tavily search credits ran out",
@@ -185,7 +186,8 @@ def aggregate(rows: list[dict]) -> dict:
     ok = [row for row in rows if "error" not in row]
     agg: dict = {"cases": len(rows), "errors": len(rows) - len(ok)}
     for key in MEAN_KEYS:
-        agg[key] = round(statistics.fmean(row["metrics"][key] for row in ok), 3) if ok else None
+        values = [row["metrics"][key] for row in ok if key in row["metrics"]]  # older runs may lack a newer metric
+        agg[key] = round(statistics.fmean(values), 3) if values else None
     checks = [passed for row in ok for passed in row["checks"].values()]
     agg["hard_checks_passed"] = round(sum(checks) / len(checks), 3) if checks else None
 
@@ -314,6 +316,8 @@ def print_table(results: list[dict]) -> None:
         failed = [name for name, ok in result["checks"].items() if not ok]
         if failed:
             print(f"    failed checks: {', '.join(failed)}")
+        if m["sources"] and m.get("wikipedia_share") == 1:
+            print("    only Wikipedia sources: the web search may have failed, check the server log")
         if rubric is False:
             print(f"    criteria: {result['rubric']['reason']}")
 

@@ -104,6 +104,7 @@ def evaluate_report(report: str, sources: list[dict], language: str | None = Non
         "blocked_sources": sum(1 for url in urls if ranking.is_blocked(url)),
         "marketing_sources": marketing,
         "authority_share": share(authority),
+        "wikipedia_share": share(sum(1 for source in sources if source.get("kind") == "wikipedia")),
         "max_host_share": share(max(Counter(hosts).values())) if hosts else 0.0,
         "cut_off_titles": sum(1 for title in titles if title.rstrip().endswith(("…", "..."))),
         "long_titles": sum(1 for title in titles if len(title) > MAX_TITLE_LENGTH),
