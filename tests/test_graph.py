@@ -184,6 +184,21 @@ def test_used_up_tavily_credits_warn_once_per_analyst_and_the_report_still_gets_
     assert "## Sources" in final["final_report"]
 
 
+def test_a_rejected_tavily_key_is_warned_about_like_used_up_credits(llm, monkeypatch):
+    from src.utils.tools import SearchKeyRejected
+
+    def web(query, *args, **kwargs):
+        raise SearchKeyRejected("Error 401: Unauthorized")
+
+    monkeypatch.setattr("src.utils.nodes.tavily_search", web)
+    graph = make_graph()
+    config, _ = start(graph, {"max_analyst": 1})
+    final = approve(graph, config)
+
+    assert [w["code"] for w in final["warnings"]] == ["search_key_rejected"]
+    assert "## Sources" in final["final_report"]
+
+
 def test_credits_running_out_between_two_queries_keep_what_the_first_one_found(llm, monkeypatch):
     from src.utils.tools import SearchCreditsExhausted
 

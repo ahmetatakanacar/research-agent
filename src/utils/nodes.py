@@ -39,7 +39,7 @@ from src.utils.sources import (
     unique_documents,
 )
 from src.utils.states import GenerateAnalystState, InterviewState, ResearchGraphState
-from src.utils.tools import SearchCreditsExhausted, tavily_search, wikipedia_search
+from src.utils.tools import SearchUnavailable, tavily_search, wikipedia_search
 
 load_dotenv()
 
@@ -202,12 +202,12 @@ def search_web(state: InterviewState):
         queries.append(english)
 
     found: list = []
-    exhausted = False
+    unavailable = ""
     for q in queries:
         try:
             found.append(tavily_search(q, SEARCH_DEPTH, SEARCH_CANDIDATES))
-        except SearchCreditsExhausted:
-            exhausted = True  # the credits can run out between two queries: keep what the earlier ones found
+        except SearchUnavailable as exc:
+            unavailable = exc.code  # the credits can run out between two queries: keep what the earlier ones found
             break
     candidates: list = []
     seen: set[str] = set()
@@ -216,14 +216,14 @@ def search_web(state: InterviewState):
             seen.add(doc["url"])
             candidates.append(doc)
     update: dict = {"context": curate_sources(candidates, query, SEARCH_RESULTS)}
-    if exhausted:
+    if unavailable:
         # The report says so, once per analyst.
         analyst = _analyst(state["analyst"]).name
-        logger.warning("Tavily credits are used up: %s's interview continues without (some) web results", analyst)
-        told = any(w.get("code") == "search_credits_exhausted" and w.get("analyst") == analyst
-                   for w in state.get("warnings") or [])
+        logger.warning("Tavily is unavailable (%s): %s's interview continues without (some) web results",
+                       unavailable, analyst)
+        told = any(w.get("code") == unavailable and w.get("analyst") == analyst for w in state.get("warnings") or [])
         if not told:
-            update["warnings"] = [{"code": "search_credits_exhausted", "analyst": analyst}]
+            update["warnings"] = [{"code": unavailable, "analyst": analyst}]
     return update
 
 

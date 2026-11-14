@@ -681,6 +681,7 @@ const WARNING_TEXT = {
   no_sources: "warn_no_sources",
   review_failed: "warn_review_failed",
   search_credits_exhausted: "warn_search_credits",
+  search_key_rejected: "warn_search_key",
 };
 
 function renderReportNotes() {

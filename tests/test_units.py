@@ -117,6 +117,9 @@ def test_tavily_search_sees_the_failures_the_real_tool_returns_instead_of_raisin
     assert "error" in tool.invoke({"query": "q"})
     with pytest.raises(tools.SearchCreditsExhausted):
         tools.tavily_search("q")
+    answer("Error 401: Unauthorized: missing or invalid API key.")
+    with pytest.raises(tools.SearchKeyRejected):
+        tools.tavily_search("q")
     answer("Error 500: boom")
     assert tools.tavily_search("q") == []
 

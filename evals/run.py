@@ -42,10 +42,14 @@ TAVILY_CREDITS_PER_QUERY = {"basic": 1, "advanced": 2}
 SCORED_KEYS = ("metrics", "checks", "numbers", "claims", "rubric", "coverage", "judge_usage")
 MEAN_KEYS = ("words", "subheadings", "sources", "authority_share", "max_host_share", "marketing_sources")
 SAME_MODEL = "app default (the model that writes the reports)"
+SEARCH_STOPS = {
+    "search_credits_exhausted": "the Tavily search credits ran out",
+    "search_key_rejected": "the Tavily key was rejected",
+}
 
 
 class OutOfCredit(Exception):
-    """A case could not finish properly because a service it pays for ran dry."""
+    """A case could not finish properly because a service it pays for ran dry or refused its key."""
 
 
 def tavily_credits(case: dict, analysts: int) -> int:
@@ -125,9 +129,10 @@ def run_case(case: dict, analysts: int = 2, judge_llm=None, max_claims: int = 24
     graph.invoke({"topic": case["topic"], "max_analyst": analysts, "language": case["language"]}, config)
     final = graph.invoke(Command(resume=""), config)
     elapsed = time.monotonic() - started
-    if any(w.get("code") == "search_credits_exhausted" for w in final.get("warnings") or []):
+    stops = [SEARCH_STOPS[w["code"]] for w in final.get("warnings") or [] if w.get("code") in SEARCH_STOPS]
+    if stops:
         # The report was written from Wikipedia alone for part of the interviews: scoring it would blame the agent.
-        raise OutOfCredit("the Tavily search credits ran out during this case, so its sources are incomplete")
+        raise OutOfCredit(f"{stops[0]} during this case, so its sources are incomplete")
 
     sources = final["final_sources"]
     by_url = {source["url"]: source for source in final.get("sources") or []}

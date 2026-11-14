@@ -1,6 +1,6 @@
 """Search tools. Every tool returns a list of SourceDoc dicts and never raises: a failing source must not
-take the whole interview down. The one exception is Tavily saying its credits are used up
-(`SearchCreditsExhausted`), because then every later search fails too and the user has to be told."""
+take the whole interview down. The one exception is a Tavily failure that every later search repeats, used up
+credits or a rejected key (`SearchUnavailable`), because then the user has to be told."""
 
 import logging
 import os
@@ -36,11 +36,28 @@ TAVILY_CANDIDATE_FACTOR = 2
 TAVILY_MAX_CANDIDATES = 20
 
 
-class SearchCreditsExhausted(Exception):
-    """Tavily refused a search because the plan's credits are used up (its 432 and 433 answers)."""
+class SearchUnavailable(Exception):
+    """Tavily refused a search for a reason that every later search runs into too. `code` names it in warnings."""
+
+    code = "search_unavailable"
 
 
-_CREDITS_EXHAUSTED = re.compile(r"\bError (?:432|433)\b")
+class SearchCreditsExhausted(SearchUnavailable):
+    """The plan's credits are used up (Tavily's 432 and 433 answers)."""
+
+    code = "search_credits_exhausted"
+
+
+class SearchKeyRejected(SearchUnavailable):
+    """The API key is missing or invalid (Tavily's 401 answer)."""
+
+    code = "search_key_rejected"
+
+
+_UNAVAILABLE = [
+    (re.compile(r"\bError (?:432|433)\b"), SearchCreditsExhausted),
+    (re.compile(r"\bError 401\b"), SearchKeyRejected),
+]
 
 
 class WikipediaRateLimited(Exception):
@@ -163,8 +180,9 @@ def tavily_search(query: str, search_depth: str = "basic", max_results: int = 3)
     error = data.get("error") if isinstance(data, dict) else None
     if error is not None:
         cause = error if isinstance(error, BaseException) else None
-        if _CREDITS_EXHAUSTED.search(str(error)):
-            raise SearchCreditsExhausted(str(error)) from cause
+        for pattern, unavailable in _UNAVAILABLE:
+            if pattern.search(str(error)):
+                raise unavailable(str(error)) from cause
         logger.warning("Tavily search failed for query %r: %s", query, error, exc_info=cause)
         return []
 

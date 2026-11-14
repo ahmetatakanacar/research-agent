@@ -546,8 +546,18 @@ def test_a_try_whose_web_search_ran_dry_is_not_scored(llm, monkeypatch):
         raise SearchCreditsExhausted("Error 432: usage limit")
 
     monkeypatch.setattr("src.utils.nodes.tavily_search", dry)
-    with pytest.raises(run.OutOfCredit, match="Tavily"):
-        run.run_case({"id": "demo", "category": "technical", "language": "en", "topic": "A fake topic"}, analysts=1)
+    case = {"id": "demo", "category": "technical", "language": "en", "topic": "A fake topic"}
+    with pytest.raises(run.OutOfCredit, match="credits ran out"):
+        run.run_case(case, analysts=1)
+
+    from src.utils.tools import SearchKeyRejected
+
+    def rejected(query, *args, **kwargs):
+        raise SearchKeyRejected("Error 401: Unauthorized")
+
+    monkeypatch.setattr("src.utils.nodes.tavily_search", rejected)
+    with pytest.raises(run.OutOfCredit, match="key was rejected"):
+        run.run_case(case, analysts=1)
     assert run.stop_reason(run.OutOfCredit("the Tavily search credits ran out")) == "the Tavily search credits ran out"
     assert run.stop_reason(OUT_OF_CREDIT) == "the OpenAI account has no credit left"
     assert run.stop_reason(AuthenticationError("bad key")) == "the OpenAI key was rejected"
