@@ -43,6 +43,6 @@ class ResearchGraphState(TypedDict):
     introduction: str
     content: str
     conclusion: str
-    review_notes: List[dict]
+    review_notes: Annotated[List[dict], operator.add]  # the introduction and conclusion add theirs beside the body's
     final_report: str
     final_sources: List[dict]

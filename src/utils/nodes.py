@@ -317,7 +317,7 @@ def write_report(state: ResearchGraphState):
     return {"content": "".join(parts)}
 
 
-def _intro_or_conclusion(state: ResearchGraphState, request: str) -> str:
+def _intro_or_conclusion(state: ResearchGraphState, key: str, request: str) -> dict:
     language = normalize_language(state.get("language"))
     sections = state["merged_sections"]
     system = SystemMessage(content=intro_conclusion_instructions.format(
@@ -334,7 +334,8 @@ def _intro_or_conclusion(state: ResearchGraphState, request: str) -> str:
         retried = text_of(get_llm().invoke([system, HumanMessage(content=request + CITATION_REMINDER)]))
         if CITE_RE.search(retried):
             text = retried
-    return _fix_figures(state, text)
+    text, notes = _fix_figures(state, text)
+    return {key: text, "review_notes": notes} if notes else {key: text}
 
 
 def _edit(language: str, text: str, issues: list[dict]) -> str:
@@ -349,29 +350,31 @@ def _edit(language: str, text: str, issues: list[dict]) -> str:
     ])).strip()
 
 
-def _fix_figures(state: ResearchGraphState, text: str) -> str:
+def _fix_figures(state: ResearchGraphState, text: str) -> tuple[str, list[dict]]:
     """The introduction and the conclusion are written beside the fact-checked body, so the fact-check never sees
     them. Their figures are checked here against every source gathered, and the editor is asked once when one is
-    not there. The text is kept as it was when anything goes wrong."""
+    not there. Returns the text and the fact-check notes for it; the text is kept as it was when anything goes
+    wrong."""
     language = normalize_language(state.get("language"))
     try:
         issues = figure_issues(
             text, {s["n"]: s for s in state.get("sources") or []}, state.get("topic", ""), language)
         if not issues:
-            return text
+            return text, []
         revised = _edit(language, text, issues)
     except Exception:
         logger.warning("Figure check failed; keeping the text as written", exc_info=True)
-        return text
-    return revised if revised and len(revised) >= 0.5 * len(text) else text
+        return text, []
+    fixed = bool(revised) and len(revised) >= 0.5 * len(text)
+    return (revised if fixed else text), [{**issue, "fixed": fixed} for issue in issues]
 
 
 def write_introduction(state: ResearchGraphState):
-    return {"introduction": _intro_or_conclusion(state, "Write the report introduction")}
+    return _intro_or_conclusion(state, "introduction", "Write the report introduction")
 
 
 def write_conclusion(state: ResearchGraphState):
-    return {"conclusion": _intro_or_conclusion(state, "Write the report conclusion")}
+    return _intro_or_conclusion(state, "conclusion", "Write the report conclusion")
 
 
 def _sources_for_review(sources: list[dict]) -> str:

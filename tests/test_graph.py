@@ -347,7 +347,7 @@ class FigureChat(fakes.ScriptedChat):
         text = super().respond(messages)
         if self.calls[-1] == "intro":
             return text.replace("Summary sentence [1].", "It cites 6306 and several other things at length [1].")
-        if self.calls[-1] == "revise":
+        if self.calls[-1] == "revise" and "6306" in messages[0].content:
             return "# Big Title\n\n## Introduction\n\nIt cites several things at length [1]."
         return text
 
@@ -361,12 +361,29 @@ def test_an_introduction_with_a_figure_no_source_has_goes_to_the_editor(monkeypa
         "language": "en", "topic": "a law", "merged_sections": ["A claim [1]."],
         "sources": [{"n": 1, "title": "One", "url": "https://one.example", "content": "A claim."}],
     }
-    assert write_introduction(state) == {
-        "introduction": "# Big Title\n\n## Introduction\n\nIt cites several things at length [1]."}
+    update = write_introduction(state)
+    assert update["introduction"] == "# Big Title\n\n## Introduction\n\nIt cites several things at length [1]."
+    [note] = update["review_notes"]
+    assert "6306" in note["claim"] and "6306" in note["problem"] and note["fixed"]
     assert model.calls == ["intro", "revise"]
     # a conclusion without a bad figure is not edited
     assert write_conclusion(state) == {"conclusion": "## Conclusion\n\nSummary sentence [1]."}
     assert model.calls == ["intro", "revise", "conclusion"]
+
+
+def test_the_figure_notes_of_the_introduction_join_those_of_the_body(monkeypatch):
+    model = FigureChat(calls=[], review_issues=[{"claim": "Another point", "problem": "not in the source"}])
+    monkeypatch.setattr("src.utils.nodes.get_llm", lambda: model)
+    monkeypatch.setattr("src.utils.nodes.get_fast_llm", lambda: model)
+    monkeypatch.setattr("src.utils.nodes.tavily_search", fakes.fake_tavily)
+    monkeypatch.setattr("src.utils.nodes.wikipedia_search", fakes.fake_wikipedia)
+    graph = make_graph()
+    config, _ = start(graph)
+    final = approve(graph, config)
+
+    claims = [note["claim"] for note in final["review_notes"]]
+    assert "Another point" in claims and any("6306" in claim for claim in claims) and len(claims) == 2
+    assert "6306" not in final["final_report"]
 
 
 def test_a_failing_editor_leaves_the_introduction_as_written(monkeypatch):
