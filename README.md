@@ -171,7 +171,7 @@ You need an [OpenAI](https://platform.openai.com) key and a [Tavily](https://tav
 
 ```bash
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt -c constraints.txt     # the versions the tests last passed with
 cp .env.example .env                                    # fill in OPENAI_API_KEY and TAVILY_API_KEY
 uvicorn main:app --reload
 ```
@@ -243,7 +243,7 @@ The graphs in [langgraph.json](langgraph.json) (`research_agent`, `question_answ
 ## Development
 
 ```bash
-pip install pytest httpx ruff playwright
+pip install -r requirements.txt -c constraints.txt pytest httpx ruff playwright
 ruff check .
 pytest -q
 ```
