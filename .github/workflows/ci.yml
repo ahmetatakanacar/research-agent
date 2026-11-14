@@ -15,10 +15,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: |
+            requirements.txt
+            constraints.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest httpx ruff playwright
+        run: pip install -r requirements.txt -c constraints.txt pytest httpx ruff playwright
 
       - name: Lint
         run: ruff check .
