@@ -4,7 +4,7 @@ A multi-agent research assistant built on LangGraph. Give it a topic and it asse
 
 ## Demo
 
-<!-- Add the demo video here. On GitHub, open this file in the editor and drag research-agent-demo.mp4 into this spot: GitHub uploads it and inserts a link on its own line, which shows as a video player. -->
+https://github.com/user-attachments/assets/77cac5a5-0983-41e6-b450-be45f5617cf7
 
 ## Why this exists
 
