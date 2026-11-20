@@ -12,7 +12,7 @@ from src.settings import SEARCH_CANDIDATES, SEARCH_DEPTH, SEARCH_RESULTS
 from src.utils.figures import all_number_forms, figure_issues, number_forms, significant_numbers
 from src.utils.languages import label, language_instruction, language_name, normalize_language
 from src.utils.models import get_fast_llm, get_llm
-from src.utils.objects import Analyst, Perpectives, ReviewResult, SearchQuery, SourcePicks
+from src.utils.objects import Analyst, Perspectives, ReviewResult, SearchQuery, SourcePicks
 from src.utils.prompts import (
     analyst_instructions,
     answer_instructions,
@@ -103,7 +103,7 @@ def create_analyst(state: GenerateAnalystState):
     if feedback and current:
         current_block = current_analysts_block.format(analysts="\n\n".join(a.persona for a in current))
 
-    structured_llm = get_llm().with_structured_output(Perpectives, method="function_calling")
+    structured_llm = get_llm().with_structured_output(Perspectives, method="function_calling")
     system_message = analyst_instructions.format(
         topic=topic,
         human_analyst_feedback=feedback,
@@ -112,7 +112,7 @@ def create_analyst(state: GenerateAnalystState):
         language_instruction=language_instruction(language),
     )
     result = structured_llm.invoke(
-        [SystemMessage(content=system_message), HumanMessage(content="Please generate the set of analyst.")]
+        [SystemMessage(content=system_message), HumanMessage(content="Please generate the set of analysts.")]
     )
 
     return {"analysts": list(result.analyst)[:max_analyst]}

@@ -15,7 +15,7 @@ class Analyst(BaseModel):
         return f"Name: {self.name}\nRole: {self.role}\nAffiliation: {self.affiliation}\nDescription: {self.description}"
 
 
-class Perpectives(BaseModel):
+class Perspectives(BaseModel):
     analyst: List[Analyst] = Field(description="Comprehensive list of analysts with their roles and affiliations")
 
 

@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, Huma
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import RunnableLambda
 
-from src.utils.objects import Analyst, Perpectives, ReviewIssue, ReviewResult, SearchQuery, SourcePicks
+from src.utils.objects import Analyst, Perspectives, ReviewIssue, ReviewResult, SearchQuery, SourcePicks
 
 
 def system_text(messages: list[BaseMessage]) -> str:
@@ -88,14 +88,14 @@ class ScriptedChat(BaseChatModel):
             system = system_text(messages)
             if self.delay:
                 time.sleep(self.delay)
-            if schema is Perpectives:
+            if schema is Perspectives:
                 self.calls.append("analysts")
                 if self.fail_on == "analysts":
                     raise RuntimeError("secret internal detail")
                 count = int((re.search(r"exactly (\d+) analysts", system) or [0, 2])[1])
                 feedback = (re.search(r"creation of the analysts:[ \t]*(.*)", system) or [0, ""])[1].strip()
                 suffix = f" (revised: {feedback})" if feedback else ""
-                return Perpectives(analyst=[
+                return Perspectives(analyst=[
                     Analyst(
                         name=f"Analyst {i}", role=f"Role {i}", affiliation=f"Org {i}",
                         description=f"Focus {i}{suffix}",

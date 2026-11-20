@@ -1,5 +1,4 @@
 langgraph>=1.2
-langgraph-cli[inmem]>=0.4
 langgraph-checkpoint-sqlite>=3.0
 aiosqlite>=0.21
 langchain>=1.4

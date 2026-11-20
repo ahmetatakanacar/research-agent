@@ -158,9 +158,12 @@ src/
     tools.py                Tavily and Wikipedia search
     ranking.py              result filtering, authority ranking, title cleanup
     sources.py              citation numbering, tidying and the Sources section
+    claims.py               cited sentences of a report (fact-check and evals)
+    figures.py              figures in a report checked against its sources
     languages.py            report languages and their labels
     models.py               ChatOpenAI factories
 web/                        the UI (index.html, app.js, api.js, render.js, i18n.js, CSS)
+evals/                      report quality evals and the judge calibration (canary)
 tests/                      offline tests, plus browser tests in tests/e2e
 Dockerfile, .github/        container image and CI
 ```
@@ -235,6 +238,7 @@ A research moves through the statuses `running`, `awaiting_approval`, `done`, `e
 ## LangGraph Studio
 
 ```bash
+pip install "langgraph-cli[inmem]" -c constraints.txt   # development tool, not needed to run the app
 langgraph dev
 ```
 
