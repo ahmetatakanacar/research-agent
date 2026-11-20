@@ -1,5 +1,8 @@
 # research-agent
 
+[![CI](https://github.com/ahmetatakanacar/research-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/ahmetatakanacar/research-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A multi-agent research assistant built on LangGraph. Give it a topic and it assembles a team of AI analysts, lets you review the team, has every analyst interview an "expert" that can only answer from retrieved web and Wikipedia sources, and merges the interviews into one report with numbered citations. A web UI (English / Türkçe) shows the work live, keeps a history and exports the result.
 
 ## Demo
